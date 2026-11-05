@@ -88,7 +88,8 @@ product or per benefit for members. Place photos (not the logo) inside the secti
 5. A line containing only ---
 6. A closing paragraph ending with the 🦅 emoji.
 
-Match the tone and structure of this real article, NOT its content:
+Match the tone and structure of this real article, NOT its content. Do not reuse its sentences or stock phrases \
+(for example its opening, its thank-you or its closing line): write fresh wording based only on the brief:
 -----
 {style_example}-----
 

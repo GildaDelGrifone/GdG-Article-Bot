@@ -20,6 +20,14 @@ class TestSlugs(unittest.TestCase):
         self.assertFalse(slug.endswith("-"))
         self.assertTrue(all(part == "parola" for part in slug.split("-")))
 
+    def test_truncated_slug_does_not_end_with_a_joiner_word(self):
+        slug = content.slugify("Grande successo per il torneo di Catan alla Gilda del Grifone")
+        self.assertEqual(slug, "grande-successo-per-il-torneo-di-catan-alla-gilda")
+        self.assertEqual(content.slugify("a" * 59 + " di casa"), "a" * 59)
+
+    def test_short_slugs_keep_their_joiners(self):
+        self.assertEqual(content.slugify("Il torneo di Catan"), "il-torneo-di-catan")
+
     def test_strip_date_matches_the_site_rule(self):
         self.assertEqual(content.strip_date("2026-04-festival-oriente.md"), "festival-oriente")
         self.assertEqual(content.strip_date("2026-10-28-x.md"), "x")

@@ -13,6 +13,11 @@ EXCERPT_LIMIT = 160
 SLUG_MAX_LENGTH = 60
 KINDS = ("news", "collab")
 
+# Parole che non possono chiudere uno slug accorciato
+_DANGLING_WORDS = frozenset(
+    "a al alla alle allo agli ai con da dal dei del della delle dello di e ed in il i la le lo gli nel nella nei per su un una uno".split()
+)
+
 # Stessa regola di articleSlug in GdG-Website/src/lib/urls.ts
 _DATE_PREFIX = re.compile(r"^\d{4}-\d{2}(-\d{2})?-")
 
@@ -26,7 +31,10 @@ def slugify(text, max_length=SLUG_MAX_LENGTH):
         # taglia a fine parola, a meno che il limite cada proprio su un trattino
         if slug[max_length] != "-" and "-" in cut:
             cut = cut.rsplit("-", 1)[0]
-        slug = cut.strip("-")
+        words = cut.strip("-").split("-")
+        while len(words) > 1 and words[-1] in _DANGLING_WORDS:  # niente slug che finiscono con «-del» o «-e»
+            words.pop()
+        slug = "-".join(words)
     return slug or "articolo"
 
 
