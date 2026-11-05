@@ -23,6 +23,10 @@ class PipelineError(Exception):
     """Errore comprensibile all'utente (messaggio in italiano): impostazioni mancanti, upload fallito, bozza non creata..."""
 
 
+class SettingsError(PipelineError):
+    """Mancano impostazioni obbligatorie (variabili del file .env)."""
+
+
 @dataclass
 class Draft:
     kind: str
@@ -37,6 +41,7 @@ class Draft:
     public_url: Optional[str] = None
     id: Optional[int] = None
     dry_run: bool = False
+    date_iso: Optional[str] = None
 
 
 def _date_iso(date):
@@ -56,7 +61,7 @@ def _date_label(date_iso):
 def _check_settings(mode):
     missing = config.missing_settings(mode)
     if missing:
-        raise PipelineError("Impostazioni mancanti: " + ", ".join(missing))
+        raise SettingsError("Impostazioni mancanti: " + ", ".join(missing))
 
 
 def _vision_images(paths):
@@ -187,7 +192,8 @@ def create_article(kind, brief, image_paths, cover=None, logo=None, order=None, 
         image_urls = [f"{DRY_RUN_HOST}/{slug}/img_{n}.jpg" for n in range(1, len(image_paths) + 1)]
         logo_url = f"{DRY_RUN_HOST}/{card_slug}/logo.png" if card_slug else None
         excerpt, markdown, card = _render(kind, result, date_iso, image_urls, card_slug, logo_url, order)
-        return Draft(kind, slug, result["title"].strip(), excerpt, markdown, card_slug, card, dry_run=True)
+        return Draft(kind, slug, result["title"].strip(), excerpt, markdown, card_slug, card, dry_run=True,
+                     date_iso=date_iso)
 
     keys = _upload_images(image_paths, slug)
     image_urls = [storage.media_url(key) for key in keys]
@@ -208,7 +214,7 @@ def create_article(kind, brief, image_paths, cover=None, logo=None, order=None, 
     )
     db.update_article(article_id, image_paths=_keep_originals(article_id, image_paths))
     return Draft(kind, slug, result["title"].strip(), excerpt, markdown, card_slug, card, branch, draft_url,
-                 content.public_url(slug), article_id)
+                 content.public_url(slug), article_id, date_iso=date_iso)
 
 
 def _load_draft(article_id):
@@ -254,7 +260,7 @@ def revise_article(article_id, feedback, provider=None):
     db.update_article(article_id, title=result["title"].strip(), last_body=result["body"], draft_url=draft_url,
                       cover_index=result.get("cover_index"), logo_index=logo_index, logo_key=logo_key)
     return Draft(kind, article["slug"], result["title"].strip(), excerpt, markdown, article["card_slug"], card,
-                 article["branch"], draft_url, article["public_url"], article_id)
+                 article["branch"], draft_url, article["public_url"], article_id, date_iso=article["date_iso"])
 
 
 def publish(article_id):

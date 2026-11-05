@@ -30,7 +30,7 @@ An admin supplies a free-text brief and one or more images. The bot:
 It does **not** handle game-night recaps ("serate"): those stay in `GdG-Event-Bot`.
 
 ## 2. Workflows
-Both entry points call the same pipeline (`core/pipeline.py`, *planned*).
+Both entry points call the same pipeline (`core/pipeline.py`: `create_article`, `revise_article`, `publish`, `discard`; blocking functions, `PipelineError` carries an Italian message for the user, `SettingsError` marks missing `.env` values).
 
 ### 2.1. Telegram bot (`bot/`, *planned*)
 - Admin-only: every handler is restricted to `ADMIN_CHAT_ID`.
@@ -44,9 +44,9 @@ Both entry points call the same pipeline (`core/pipeline.py`, *planned*).
 ### 2.2. Claude skill (`.claude/skills/write-article/`, *planned*)
 The skill interviews the user to refine the article vision (type, facts, audience, tone, partner details, cover/logo), writes `data/briefs/<name>.md`, then runs the CLI. **The skill never writes the article text itself**: the text always comes from the configured AI provider, so both paths behave the same.
 
-### 2.3. CLI (`scripts/`, *planned*)
-- `scripts/create_article.py --kind news|collab --brief FILE --images IMG [IMG ...] [--cover N] [--logo N] [--date DD-MM-YYYY] [--dry-run] [--output FILE]`. `--dry-run` writes the front matter and body to a file or stdout without uploading or committing.
-- `scripts/publish_article.py <id|slug> [--discard]` merges or discards a draft.
+### 2.3. CLI (`scripts/`)
+- `scripts/create_article.py --kind news|collab --brief FILE --images IMG [IMG ...] [--cover N] [--logo N] [--order N] [--date DD-MM-YYYY] [--provider gemini|claude] [--dry-run] [--output FILE]`. `--dry-run` writes the front matter and body (and the partner card, each preceded by a `<!-- FILE: <site path> -->` line) to a file or stdout without uploading or committing; it needs only the AI key. Exit codes: 0 ok, 1 pipeline error, 2 bad arguments or missing settings.
+- `scripts/publish_article.py <id|slug> [--discard]` merges or discards a draft; `--list` shows the pending drafts.
 
 ## 3. Article Formats
 The website schema is `GdG-Website/src/content.config.ts`. **Keep this section in sync with it** and re-check it on the latest `main` of the website before changing the generators (the local checkout of the website may lag behind).
