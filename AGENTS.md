@@ -1,7 +1,5 @@
 # GdG-Article-Bot - Technical Specification & Architecture Guide
 
-> **Status: scaffold.** The repository currently holds documentation and empty package folders only. The step-by-step build plan is `docs/plans/IMPLEMENTATION_PLAN.md`. When a phase is implemented, update this file in the same change (sections marked *planned* become facts).
-
 ## Table of Contents
 - [1. Project Overview](#1-project-overview)
 - [2. Workflows](#2-workflows)
@@ -32,7 +30,7 @@ It does **not** handle game-night recaps ("serate"): those stay in `GdG-Event-Bo
 ## 2. Workflows
 Both entry points call the same pipeline (`core/pipeline.py`: `create_article`, `revise_article`, `publish`, `discard`; blocking functions, `PipelineError` carries an Italian message for the user, `SettingsError` marks missing `.env` values).
 
-### 2.1. Telegram bot (`bot/`, *planned*)
+### 2.1. Telegram bot (`main.py`, `bot/`)
 - Admin-only: every handler is restricted to `ADMIN_CHAT_ID`.
 - `/news` or `/collab` starts a conversation: the admin sends photos (or documents, which keep full quality) and a text brief, then `/genera`. `/annulla` aborts.
 - Optional markers in the brief override the AI: `copertina: 2` (cover = image 2), `logo: 3` (partner logo = image 3, collaborations only).
@@ -41,7 +39,7 @@ Both entry points call the same pipeline (`core/pipeline.py`: `create_article`, 
   - **Rivedi** asks for feedback with a ForceReply and regenerates on the same branch, reusing the already uploaded images.
   - **Scarta** deletes the branch (a missing branch means it was already published).
 
-### 2.2. Claude skill (`.claude/skills/write-article/`, *planned*)
+### 2.2. Claude skill (`.claude/skills/write-article/`)
 The skill interviews the user to refine the article vision (type, facts, audience, tone, partner details, cover/logo), writes `data/briefs/<name>.md`, then runs the CLI. **The skill never writes the article text itself**: the text always comes from the configured AI provider, so both paths behave the same.
 
 ### 2.3. CLI (`scripts/`)
@@ -104,24 +102,32 @@ Ported from `GdG-Event-Bot/core/astro/storage.py`:
 ## 6. Directory Structure
 ```text
 GdG-Article-Bot/
-├── main.py              # (planned) Telegram bot entry point
+├── main.py              # Telegram bot entry point (build_application, polling)
 ├── run.sh               # starts main.py with .venv / venv
-├── bot/                 # (planned) Telegram layer: handlers, keyboards, texts.py, auth
+├── bot/                 # Telegram layer (entry points)
+│   ├── auth.py          # admin_only decorator
+│   ├── conversation.py  # /news /collab ConversationHandler: collect photos + text, /genera, /annulla
+│   ├── callbacks.py     # [Pubblica] [Rivedi] [Scarta] buttons and the Rivedi reply handler
+│   ├── commands.py      # /help, /bozze
+│   ├── cards.py         # draft card text + send helper
+│   ├── keyboards.py     # inline keyboard (callback prefixes art_publish_ / art_revise_ / art_discard_)
+│   └── texts.py         # every user-facing text
 ├── core/
-│   ├── config.py        # (planned) .env loading, parsing helpers, missing_settings()
-│   ├── pipeline.py      # (planned) create_article / revise_article / publish / discard
-│   ├── prompts.py       # (planned) prompt texts for news and collaboration
-│   ├── validate.py      # (planned) structure checks on the AI output
-│   ├── db.py            # (planned) SQLite state of the drafts
-│   ├── ai/              # (planned) base.py, gemini.py, claude.py, get_provider()
-│   └── site/            # (planned) client.py, storage.py (R2), github.py, content.py
-├── scripts/             # (planned) create_article.py, publish_article.py
+│   ├── config.py        # .env loading, parsing helpers, missing_settings(mode)
+│   ├── brief.py         # parse_markers: copertina: / logo: / ordine: lines of a brief
+│   ├── prompts.py       # system + task prompts (news, collab, revise, fix), COLLAB_STYLE_EXAMPLE
+│   ├── validate.py      # normalize + check_article + generate_valid (retry loop, 3 attempts)
+│   ├── pipeline.py      # create_article / revise_article / publish / discard (+ Draft, PipelineError)
+│   ├── db.py            # SQLite state of the drafts
+│   ├── ai/              # base.py (contract, schema, errors), gemini.py, claude.py, provider.py (get_provider)
+│   └── site/            # client.py (GitHub + R2 clients), storage.py (R2), github.py, content.py (slugs, front matter, draft lifecycle)
+├── scripts/             # create_article.py, publish_article.py
 ├── tests/               # mirrors the source tree; helpers in tests/support/
-├── data/                # runtime: articles.db, briefs/, temp images (git-ignored)
-├── docs/plans/          # IMPLEMENTATION_PLAN.md
+├── data/                # runtime: articles.db, briefs/, tmp/ (originals of the open drafts), logs/ (git-ignored)
+├── docs/plans/          # IMPLEMENTATION_PLAN.md (history and rationale of the build)
 ├── .claude/skills/      # write-article skill
 ├── .github/workflows/   # CI: pyflakes + pytest
-└── AGENTS.md  CLAUDE.md  README.md  .env.example  requirements*.txt
+└── AGENTS.md  CLAUDE.md  README.md  .env.example  requirements*.txt  pytest.ini
 ```
 `main.py` and `requirements.txt` stay at the repository root: the k3s pod runs them from a hostPath mount (see README).
 
@@ -177,7 +183,7 @@ Template: `.env.example` (the real `.env` is git-ignored). Values are read at ca
 | `DATA_DIR` | Runtime folder | `data` |
 | `LOG_LEVEL` | `DEBUG`..`CRITICAL`; a typo falls back to `INFO` | `INFO` |
 
-Notes: the Gemini, GitHub, R2 and `ADMIN_CHAT_ID` values were copied from `GdG-Event-Bot`'s `.env` at scaffold time. `ASTRO_CONTENT_DIR` (the *serate* folder) was deliberately **not** copied: this project writes to `NEWS_CONTENT_DIR` / `COLLAB_CONTENT_DIR`.
+Notes: the Gemini, GitHub, R2 and `ADMIN_CHAT_ID` values were copied from `GdG-Event-Bot`'s `.env` when the project was created. `ASTRO_CONTENT_DIR` (the *serate* folder) was deliberately **not** copied: this project writes to `NEWS_CONTENT_DIR` / `COLLAB_CONTENT_DIR`.
 
 ## 9. Code Conventions
 - **Language:** user-facing strings, docstrings and code comments are in **Italian**; this file is in English because it is meant for tools. Prompts to the AI are in English and instruct it to write the article in Italian.

@@ -2,8 +2,6 @@
 
 Bot che scrive gli **articoli di news e collaborazioni** del sito della **Gilda del Grifone** (Torino). Gli dai un testo con le idee e delle immagini, un'AI (**Gemini** o **Claude**, a tua scelta) scrive l'articolo in italiano guardando le immagini, le immagini finiscono su Cloudflare R2 e l'articolo viene preparato come **bozza** nel repository del sito. Quando ti piace, lo pubblichi con un click.
 
-> ⚠️ **Stato: scaffold.** Il repository contiene per ora documentazione e cartelle vuote. Il piano di sviluppo dettagliato è in [`docs/plans/IMPLEMENTATION_PLAN.md`](docs/plans/IMPLEMENTATION_PLAN.md). Le sezioni di questo file descrivono il funzionamento a lavori finiti.
-
 ## ✨ Funzionalità
 
 - **Due tipi di articolo**: *news* e *collaborazione* (articolo + scheda partner per la pagina `/collaborazioni`).

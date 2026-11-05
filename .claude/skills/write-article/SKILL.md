@@ -5,8 +5,6 @@ description: Help the user shape and generate a news or collaboration article fo
 
 # Write an article for the GdG website
 
-> **Status:** the CLI (`scripts/create_article.py`, `scripts/publish_article.py`) is built in phases 8-9 of `docs/plans/IMPLEMENTATION_PLAN.md`. If `scripts/create_article.py` does not exist yet, say so, still help with steps 1-3 (brief), and stop.
-
 You **do not write the article text**. The text is always written by the AI provider set in `AI_PROVIDER` (Gemini or Claude), so the skill and the Telegram bot give the same kind of result. Your job: pull the right facts out of the user, produce a good brief, run the pipeline, show the result. Run everything from the repository root with `.venv/bin/python`. Never print tokens or keys from `.env`.
 
 ## 1. Pick the kind
@@ -27,25 +25,26 @@ If unsure, ask. A collaboration needs: partner name, website URL (optional), wha
 Save `data/briefs/<short-name>.md` (create the folder). Plain text in Italian or English, structured like:
 
 ```
-Tipo: news | collab
-Data: GG-MM-AAAA            (optional, default today)
 Messaggio chiave: …
 Fatti: – … – …
 Tono: …
 Partner (collab): nome, url, descrizione di una frase, vantaggi per i soci
 Immagini: 1 = …, 2 = …, 3 = …
-copertina: 2                (optional)
-logo: 1                     (collab, optional)
 Da evitare: …
+copertina: 2                (optional, line on its own: the AI is told this image is the cover)
+logo: 1                     (collab, optional, line on its own)
+ordine: 10                  (collab, optional, position of the partner card; default 100)
 ```
+
+The kind (news/collab) and the date (`--date GG-MM-AAAA`, default today) are CLI arguments, not brief lines. The `copertina:` / `logo:` / `ordine:` lines are removed from the brief before the AI sees it.
 
 Show it to the user and get a yes before generating.
 
 ## 4. Generate
 1. Dry run first (nothing is uploaded or committed):
    `.venv/bin/python scripts/create_article.py --kind <news|collab> --brief data/briefs/<name>.md --images <files in the numbered order> [--cover N] [--logo N] --dry-run --output drafts/<name>.md`
-2. Read `drafts/<name>.md` and summarise it for the user (title, excerpt, sections, image placement). If something is wrong, **change the brief**, not the output, and rerun. Up to 3 attempts, then ask the user.
-3. After the user agrees, run the same command without `--dry-run`. It uploads the images to R2 and creates the draft branch; note the draft link and the final URL it prints.
+2. Read `drafts/<name>.md` (the article, and for a collab the partner card, each preceded by a `<!-- FILE: ... -->` line) and summarise it for the user (title, excerpt, sections, image placement). If something is wrong, **change the brief**, not the output, and rerun. Up to 3 attempts, then ask the user.
+3. After the user agrees, run the same command without `--dry-run` and without `--output` (the CLI rejects `--output` on a real run). It uploads the images to R2 and creates the draft branch; note the draft link and the final URL it prints.
 
 ## 5. Publish only on an explicit yes
 Never publish on your own. When the user confirms:
