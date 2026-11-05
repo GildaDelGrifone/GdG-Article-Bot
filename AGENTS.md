@@ -126,25 +126,32 @@ GdG-Article-Bot/
 `main.py` and `requirements.txt` stay at the repository root: the k3s pod runs them from a hostPath mount (see README).
 
 ## 7. Database Schema
-SQLite `DATA_DIR/articles.db` (*planned*, created by `init_db()`), table `articles`:
+SQLite `DATA_DIR/articles.db` (`core/db.py`, created by `init_db()`), table `articles`:
 
 | Column | Type | Description |
 |---|---|---|
 | `id` | INTEGER PK | Draft id |
 | `kind` | TEXT | `news` or `collab` |
-| `slug` | TEXT | Final unique slug |
+| `slug` | TEXT | Final unique article slug (URL `/news/<slug>/`) |
+| `card_slug` | TEXT | Partner card file name (collaborations only) |
 | `branch` | TEXT | Draft branch on the website repo |
 | `title` | TEXT | Article title |
 | `status` | TEXT | `draft`, `published`, `discarded` |
+| `date_iso` | TEXT | Article date `YYYY-MM-DD` |
 | `draft_url` | TEXT | GitHub link to the draft file |
 | `public_url` | TEXT | Final URL on the site |
-| `image_keys` | TEXT | JSON list of R2 keys, in upload order |
-| `brief` | TEXT | Original admin brief |
-| `last_body` | TEXT | Last generated Markdown (input of Rivedi) |
+| `image_keys` | TEXT | JSON list of R2 keys, in image order (index N-1 = image N) |
+| `image_paths` | TEXT | JSON list of the original images kept in `DATA_DIR/tmp/<id>/` until publish/discard (needed by Rivedi) |
+| `cover_override`, `logo_override` | INTEGER | Image numbers chosen by the admin (`copertina:`, `logo:`); reused by Rivedi |
+| `cover_index`, `logo_index` | INTEGER | Image numbers actually used |
+| `logo_key` | TEXT | R2 key of the partner logo (`collaborazioni/<card_slug>/logo_<uuid8>.<ext>`) |
+| `card_order` | INTEGER | `ordine` of the partner card (default 100) |
+| `brief` | TEXT | Admin brief, markers removed |
+| `last_body` | TEXT | Last generated Markdown, with `img:N` placeholders (input of Rivedi) |
 | `chat_id`, `message_id` | INTEGER | Draft card in Telegram |
 | `created_at` | TIMESTAMP | Default `CURRENT_TIMESTAMP` |
 
-Schema changes: add the column to `CREATE TABLE` *and* to a `COLUMN_MIGRATIONS` list applied by `init_db()`, as in `GdG-Event-Bot/core/db/schema.py`.
+Schema changes: add the column to `CREATE TABLE` *and* to `COLUMN_MIGRATIONS` (`(name, definition)` pairs applied by `init_db()` to existing databases).
 
 ## 8. Environment Variables
 Template: `.env.example` (the real `.env` is git-ignored). Values are read at call time through `from core import config`.

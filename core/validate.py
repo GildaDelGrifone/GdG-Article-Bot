@@ -167,9 +167,11 @@ def check_article(result, kind, n_images):
             if partner.get("url") is not None and not _valid_url(partner["url"]):
                 problems.append(f"l'indirizzo del partner non è valido: {partner['url']!r}")
             logo = partner.get("logo_index")
-            if logo is not None and not _valid_index(logo, n_images):
+            if logo is None:
+                problems.append("manca l'immagine del logo del partner (logo_index): la scheda del sito lo richiede")
+            elif not _valid_index(logo, n_images):
                 problems.append(f"logo_index {logo!r} non valido (le immagini sono {n_images})")
-            elif logo is not None and logo == cover:
+            elif logo == cover:
                 problems.append("copertina e logo sono la stessa immagine")
     return problems
 

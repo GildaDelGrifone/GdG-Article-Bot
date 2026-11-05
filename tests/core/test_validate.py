@@ -151,7 +151,7 @@ class TestCheckCollab(unittest.TestCase):
 
     def test_logo_index(self):
         partner = collab()["partner"]
-        self.assertEqual(self.problems(collab(partner={**partner, "logo_index": None})), [])
+        self.assertProblem("manca l'immagine del logo", self.problems(collab(partner={**partner, "logo_index": None})))
         self.assertProblem("logo_index", self.problems(collab(partner={**partner, "logo_index": 7})))
         self.assertProblem("stessa immagine", self.problems(collab(partner={**partner, "logo_index": 1})))
 
