@@ -62,6 +62,7 @@ logs/
 # Temporary files
 tmp/
 temp/
+.sandbox/
 
 # Output delle bozze generate in locale (--dry-run --output)
 drafts/
