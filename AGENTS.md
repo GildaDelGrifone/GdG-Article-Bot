@@ -83,11 +83,11 @@ Ported from `GdG-Event-Bot/core/astro/storage.py`:
 - Images are never committed to the website repo.
 
 ## 5. AI Providers
-`core/ai/` (*planned*): one interface, two implementations.
-- `generate(system, prompt, images) -> dict`: returns the parsed JSON contract below. Raises `AIQuotaError` on quota/credit/rate errors (Gemini 429 / `RESOURCE_EXHAUSTED`, Claude 429 / overloaded), so the bot can alert the admin.
-- `gemini.py`: `google-genai`, `response_mime_type="application/json"`, images as `Part.from_bytes`.
-- `claude.py`: `anthropic` SDK, images as base64 image blocks, JSON obtained through a forced tool call. Load the `claude-api` skill before writing or changing it.
-- `get_provider()` reads `AI_PROVIDER` (`gemini` default, `claude`); an invalid value logs a warning and falls back to `gemini`.
+`core/ai/`: one interface, two implementations.
+- `generate(system, prompt, images, schema) -> dict`: returns the parsed JSON contract below (`images` = list of `(bytes, mime)`, `schema` from `base.article_schema(kind)`). Raises `AIQuotaError` on quota/credit/rate errors (Gemini 429 / `RESOURCE_EXHAUSTED`, Claude 429 / overloaded), so the bot can alert the admin.
+- `gemini.py`: `google-genai`, `response_mime_type="application/json"` + `response_json_schema`, images as `Part.from_bytes`.
+- `claude.py`: `anthropic` SDK, images as base64 image blocks, JSON through `output_config.format` (`json_schema`). **No forced `tool_choice`** (rejected with a 400 by the 5.x models, including the default `claude-sonnet-5-5`), no `thinking` / sampling parameters; `output_config.effort` (`medium`) is sent only to 4.6+/5.x models. Load the `claude-api` skill before changing it.
+- `provider.py`: `get_provider()` reads `AI_PROVIDER` (`gemini` default, `claude`); the invalid-value fallback lives in `core/config.py`.
 
 **Output contract** (both providers, both kinds):
 ```json
