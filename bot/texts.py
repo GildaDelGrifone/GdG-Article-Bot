@@ -3,7 +3,7 @@ import html
 
 UNAUTHORIZED = "Non sei autorizzato."
 
-KIND_LABELS = {"news": "News", "collab": "Collaborazione"}
+KIND_LABELS = {"news": "News", "collab": "Collaborazione", "card": "Scheda partner"}
 
 BUTTON_PUBLISH = "Pubblica sul sito"
 BUTTON_REVISE = "✏️ Rivedi"

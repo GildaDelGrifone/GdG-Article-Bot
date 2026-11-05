@@ -159,6 +159,34 @@ class TestCreateDraft(unittest.TestCase):
             self.assertEqual(content.create_draft("news", "festa", "2026-11-05", "md"), (None, None))
 
 
+class TestCreateCardDraft(unittest.TestCase):
+    def test_card_only_draft_sequence(self):
+        responses = [response(404), response(200, BASE), response(201), response(404), response(201)]
+        with site_config(), patched_requests(*responses) as req:
+            url, branch = content.create_card_draft("aces-games", "---\nnome: \"Aces\"\n---\n")
+        self.assertEqual(branch, "scheda/aces-games")
+        self.assertEqual(url, "https://github.com/o/r/blob/scheda/aces-games/src/content/collaborazioni/aces-games.md")
+        puts = [c for c in req.call_args_list if c.args[0] == "PUT"]
+        self.assertEqual(len(puts), 1)
+        self.assertEqual(puts[0].kwargs["json"]["message"], "Bozza scheda aces-games")
+
+    def test_failed_commit_deletes_the_branch(self):
+        responses = [response(404), response(200, BASE), response(201), response(404), response(422, text="bad"),
+                     response(204)]
+        with site_config(), patched_requests(*responses) as req:
+            self.assertEqual(content.create_card_draft("x", "md"), (None, None))
+        self.assertEqual(calls(req)[-1][0], "DELETE")
+
+    def test_no_credentials(self):
+        with patch("core.site.content.github_credentials", return_value=None):
+            self.assertEqual(content.create_card_draft("x", "md"), (None, None))
+
+    def test_branch_name_and_collaborations_url(self):
+        with site_config():
+            self.assertEqual(content.branch_name("card", "x"), "scheda/x")
+            self.assertEqual(content.collaborations_url(), "https://example.org/collaborazioni/")
+
+
 class TestUpdatePublishDiscard(unittest.TestCase):
     def test_update_overwrites_on_the_same_branch(self):
         with site_config(), patched_requests(response(200, {}), response(200, {"sha": "old"}), response(200)) as req:

@@ -138,8 +138,9 @@ class TestCreateCollab(PipelineTestCase):
         self.assertEqual(
             card,
             '---\nnome: "Aces Games"\nlogo: "https://pub.r2.dev/collaborazioni/aces-games/logo_abcd1234.jpg"\n'
-            'url: "https://acesgames.it"\ndescrizione: "Casa editrice italiana."\nordine: 7\n---\n',
+            'url: "https://example.org/news/collaborazione-con-aces-games/"\ndescrizione: "Casa editrice italiana."\nordine: 7\n---\n',
         )
+        self.assertNotIn("acesgames.it", card)  # il sito del partner sta nell'articolo, non nella scheda
         row = db.get_article(draft.id)
         self.assertEqual((row["kind"], row["card_slug"], row["logo_index"], row["card_order"]), ("collab", "aces-games", 3, 7))
         self.assertTrue(row["logo_key"].startswith("collaborazioni/aces-games/logo_"))
@@ -379,3 +380,121 @@ class TestPublishAndDiscard(PipelineTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCreateCard(PipelineTestCase):
+    def setUp(self):
+        super().setUp()
+        self.logo = image_file(self.temp_dir, "logo.png", 300, 300)
+        self.create_card_draft = patch(
+            "core.pipeline.content.create_card_draft", return_value=(DRAFT_URL, "scheda/aces-games"))
+        self.create_card_draft = self.create_card_draft.start()
+        self.addCleanup(patch.stopall)
+        self.news_names.return_value = ["2026-10-02-collaborazione-con-aces-games.md"]  # l'articolo a cui punta la scheda
+
+    def card(self, **kwargs):
+        kwargs.setdefault("descrizione", "Casa editrice italiana di giochi di ruolo.")
+        kwargs.setdefault("article", "collaborazione-con-aces-games")
+        return pipeline.create_card("Aces Games", self.logo, **kwargs)
+
+    def test_happy_path_uploads_the_logo_and_creates_the_draft(self):
+        draft = self.card(order=10)
+        self.assertEqual((draft.kind, draft.slug, draft.card_slug, draft.title), ("card", "aces-games", "aces-games", "Aces Games"))
+        self.assertEqual((draft.branch, draft.draft_url), ("scheda/aces-games", DRAFT_URL))
+        self.assertEqual(draft.public_url, "https://example.org/collaborazioni/")
+        self.upload.assert_called_once_with(self.logo, "collaborazioni/aces-games", "logo")
+        slug, markdown = self.create_card_draft.call_args.args
+        self.assertEqual(slug, "aces-games")
+        self.assertIn('nome: "Aces Games"\nlogo: "https://pub.r2.dev/collaborazioni/aces-games/logo_abcd1234.png"\n'
+                      'url: "https://example.org/news/collaborazione-con-aces-games/"\n'
+                      'descrizione: "Casa editrice italiana di giochi di ruolo."\nordine: 10',
+                      markdown)
+        self.create_draft.assert_not_called()
+
+    def test_database_row(self):
+        draft = self.card()
+        row = db.get_article(draft.id)
+        self.assertEqual((row["kind"], row["status"], row["slug"], row["card_slug"], row["branch"]),
+                         ("card", "draft", "aces-games", "aces-games", "scheda/aces-games"))
+        self.assertEqual((row["card_order"], row["image_keys"], row["image_paths"]), (100, [], []))
+        self.assertEqual(row["logo_key"], "collaborazioni/aces-games/logo_abcd1234.png")
+
+    def test_card_is_published_and_discarded_like_a_draft(self):
+        draft = self.card()
+        self.assertEqual(pipeline.publish(draft.id), "https://example.org/collaborazioni/")
+        self.publish_draft.assert_called_once_with("scheda/aces-games")
+        self.assertEqual(db.get_article(draft.id)["status"], "published")
+
+    def test_dry_run_uploads_and_commits_nothing(self):
+        with patched_config(GEMINI_API_KEY=None, R2_ACCOUNT_ID=None):
+            draft = self.card(dry_run=True)
+        self.assertTrue(draft.dry_run)
+        self.assertIn('logo: "https://media.example/aces-games/logo.png"', draft.card_markdown)
+        self.upload.assert_not_called()
+        self.create_card_draft.assert_not_called()
+
+    def test_card_slug_is_made_unique(self):
+        self.card_names.return_value = ["aces-games.md"]
+        self.assertEqual(self.card().slug, "aces-games-2")
+
+    def test_without_an_article_the_card_has_no_link(self):
+        draft = self.card(article=None)
+        self.assertNotIn("url:", draft.card_markdown)
+
+    def test_article_date_prefix_is_ignored_when_looking_for_the_slug(self):
+        self.news_names.return_value = ["2017-01-18-altro.md", "2026-10-02-collaborazione-con-aces-games.md"]
+        self.assertIn("/news/collaborazione-con-aces-games/", self.card().card_markdown)
+
+    def test_unknown_article_creates_nothing(self):
+        self.news_names.return_value = ["2026-10-02-altro.md"]
+        with self.assertRaisesRegex(pipeline.PipelineError, "Articolo 'collaborazione-con-aces-games' non trovato"):
+            self.card()
+        with self.assertRaisesRegex(pipeline.PipelineError, "non trovato"):
+            self.card(dry_run=True)
+        self.upload.assert_not_called()
+        self.assertEqual(db.list_drafts(), [])
+
+    def test_dry_run_tolerates_an_unreadable_site_listing(self):
+        self.news_names.side_effect = RuntimeError("rete")
+        self.card_names.side_effect = RuntimeError("rete")
+        draft = self.card(dry_run=True)
+        self.assertIn("/news/collaborazione-con-aces-games/", draft.card_markdown)
+        with self.assertRaisesRegex(pipeline.PipelineError, "cartelle del sito"):
+            self.card()
+
+    def test_failed_upload_creates_nothing(self):
+        self.upload.side_effect = None
+        self.upload.return_value = None
+        with self.assertRaisesRegex(pipeline.PipelineError, "logo"):
+            self.card()
+        self.create_card_draft.assert_not_called()
+        self.assertEqual(db.list_drafts(), [])
+
+    def test_failed_github_draft(self):
+        self.create_card_draft.return_value = (None, None)
+        with self.assertRaisesRegex(pipeline.PipelineError, "GitHub"):
+            self.card()
+        self.assertEqual(db.list_drafts(), [])
+
+    def test_bad_arguments(self):
+        cases = [
+            (dict(descrizione="x" * 201), "200 caratteri"),
+            (dict(descrizione="  "), "descrizione"),
+        ]
+        for kwargs, message in cases:
+            with self.subTest(kwargs=kwargs), self.assertRaisesRegex(pipeline.PipelineError, message):
+                self.card(**kwargs)
+        with self.assertRaisesRegex(pipeline.PipelineError, "nome"):
+            pipeline.create_card(" ", self.logo, "d")
+        with self.assertRaisesRegex(pipeline.PipelineError, "Logo non trovato"):
+            pipeline.create_card("Aces", os.path.join(self.temp_dir, "no.png"), "d")
+
+    def test_missing_settings_ignore_the_ai_key(self):
+        with patched_config(GEMINI_API_KEY=None, R2_ACCOUNT_ID=None):
+            with self.assertRaisesRegex(pipeline.SettingsError, "^Impostazioni mancanti: R2_ACCOUNT_ID$"):
+                self.card()
+
+    def test_a_card_cannot_be_revised(self):
+        draft = self.card()
+        with self.assertRaisesRegex(pipeline.PipelineError, "non si rigenera"):
+            pipeline.revise_article(draft.id, "più breve")

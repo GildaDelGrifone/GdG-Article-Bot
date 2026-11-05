@@ -2,7 +2,7 @@ import re
 
 from core import config
 
-# Estratto (accorciato) del corpo di "collaborazione-con-ages-games" sul sito, con le immagini come img:N.
+# Estratto (accorciato) del corpo di "collaborazione-con-aces-games" sul sito, con le immagini come img:N.
 # Serve solo come esempio di tono e struttura: l'AI non deve copiarne i contenuti.
 COLLAB_STYLE_EXAMPLE = """\
 Siamo entusiasti di annunciare una nuova, fantastica collaborazione che andrà ad arricchire le serate di gioco della nostra associazione!

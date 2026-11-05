@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 EXCERPT_LIMIT = 160
 SLUG_MAX_LENGTH = 60
 KINDS = ("news", "collab")
+CARD_KIND = "card"  # bozza della sola scheda partner (non è un tipo di articolo: non passa dall'AI)
 
 # Parole che non possono chiudere uno slug accorciato
 _DANGLING_WORDS = frozenset(
@@ -110,12 +111,18 @@ def card_path(card_slug):
 
 
 def branch_name(kind, slug):
-    return f"{'collaborazione' if kind == 'collab' else 'news'}/{slug}"
+    prefix = {"collab": "collaborazione", CARD_KIND: "scheda"}.get(kind, "news")
+    return f"{prefix}/{slug}"
 
 
 def public_url(slug):
     """La pagina sul sito: l'URL non ha la data, solo /news/<slug>/."""
     return f"{config.ASTRO_BASE_URL}/news/{slug}/"
+
+
+def collaborations_url():
+    """La pagina che elenca le schede partner (le schede non hanno una pagina propria)."""
+    return f"{config.ASTRO_BASE_URL}/collaborazioni/"
 
 
 def existing_news_names():
@@ -157,6 +164,26 @@ def create_draft(kind, slug, date_iso, news_markdown, card_markdown=None, card_s
                 github.delete_branch(branch)
             return None, None
         return draft_url, branch
+    except Exception as e:
+        logger.error("Creazione della bozza '%s' fallita: %s", branch, e)
+        return None, None
+
+
+def create_card_draft(card_slug, card_markdown):
+    """Crea il branch `scheda/<slug>` con la sola scheda partner. Restituisce (link_bozza, branch) o (None, None)."""
+    if not github_credentials():
+        return None, None
+    branch = branch_name(CARD_KIND, card_slug)
+    try:
+        existed = github.branch_exists(branch)
+        if not github.create_branch(branch, config.ASTRO_GITHUB_BRANCH):
+            return None, None
+        path = card_path(card_slug)
+        if not github.put_file(path, card_markdown, f"Bozza scheda {card_slug}", branch):
+            if not existed:
+                github.delete_branch(branch)
+            return None, None
+        return _file_url(branch, path), branch
     except Exception as e:
         logger.error("Creazione della bozza '%s' fallita: %s", branch, e)
         return None, None

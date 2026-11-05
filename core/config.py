@@ -101,12 +101,13 @@ def _ai_key_name(provider=None):
 
 
 def missing_settings(mode):
-    """Nomi delle impostazioni mancanti per `mode`: "dry_run", "cli" o "telegram".
+    """Nomi delle impostazioni mancanti per `mode`: "dry_run", "cli", "telegram", "card_dry_run" o "card".
 
     dry_run: solo la chiave dell'AI scelta. cli: in più R2 e GitHub. telegram: in più token e chat admin.
+    Le schede partner non usano l'AI: card_dry_run non richiede nulla, card solo R2 e GitHub.
     """
-    names = [_ai_key_name()]
-    if mode in ("cli", "telegram"):
+    names = [] if mode in ("card", "card_dry_run") else [_ai_key_name()]
+    if mode in ("cli", "telegram", "card"):
         names += ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "R2_PUBLIC_URL",
                   "ASTRO_GITHUB_REPO", "ASTRO_GITHUB_TOKEN"]
     if mode == "telegram":

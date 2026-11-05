@@ -78,7 +78,7 @@ def _valid_index(value, n_images):
     return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= n_images
 
 
-def _valid_url(value):
+def valid_url(value):
     parsed = urlparse(value or "")
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
@@ -164,7 +164,7 @@ def check_article(result, kind, n_images):
                 problems.append("manca la descrizione del partner")
             elif len(description.strip()) > DESCRIPTION_LIMIT:
                 problems.append(f"la descrizione del partner supera {DESCRIPTION_LIMIT} caratteri")
-            if partner.get("url") is not None and not _valid_url(partner["url"]):
+            if partner.get("url") is not None and not valid_url(partner["url"]):
                 problems.append(f"l'indirizzo del partner non è valido: {partner['url']!r}")
             logo = partner.get("logo_index")
             if logo is None:

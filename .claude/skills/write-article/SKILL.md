@@ -46,6 +46,11 @@ Show it to the user and get a yes before generating.
 2. Read `drafts/<name>.md` (the article, and for a collab the partner card, each preceded by a `<!-- FILE: ... -->` line) and summarise it for the user (title, excerpt, sections, image placement). If something is wrong, **change the brief**, not the output, and rerun. Up to 3 attempts, then ask the user.
 3. After the user agrees, run the same command without `--dry-run` and without `--output` (the CLI rejects `--output` on a real run). It uploads the images to R2 and creates the draft branch; note the draft link and the final URL it prints.
 
+### Card only (a partner whose collaboration article is already on the site)
+If the user wants only the partner card for `/collaborazioni`, no article and no AI are involved. Collect: name, logo file, the slug of the collaboration article on the site (the card links to `/news/<slug>/`; list `src/content/news/` of the website, ignoring the date prefix), one-sentence description (at most 200 characters, only facts the user gave or that are on the partner's existing article) and optional `ordine`. Show the description for a yes, then:
+1. `.venv/bin/python scripts/create_card.py --name "<name>" --logo <file> --description "<text>" [--article <slug>] [--order N] --dry-run` (add `--output drafts/<name>.md` to save it), show the card.
+2. After the user agrees, run it again without `--dry-run`; it uploads the logo to R2 and creates the draft branch `scheda/<slug>`. Publish it as in step 5.
+
 ## 5. Publish only on an explicit yes
 Never publish on your own. When the user confirms:
 `.venv/bin/python scripts/publish_article.py <id|slug>`

@@ -96,6 +96,8 @@ Apri Claude Code in questa cartella e scrivi per esempio *"scrivi un articolo su
     --images foto1.jpg foto2.jpg --dry-run --output drafts/festival.md
 .venv/bin/python scripts/create_article.py --kind collab --brief data/briefs/partner.md \
     --images logo.png foto.jpg --logo 1
+.venv/bin/python scripts/create_card.py --name "Partner" --logo logo.png --article collaborazione-con-partner \
+    --description "Una frase di presentazione." --dry-run   # solo la scheda partner, senza articolo né AI
 .venv/bin/python scripts/publish_article.py <id|slug>            # pubblica
 .venv/bin/python scripts/publish_article.py <id|slug> --discard  # scarta
 ```

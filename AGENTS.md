@@ -28,7 +28,7 @@ An admin supplies a free-text brief and one or more images. The bot:
 It does **not** handle game-night recaps ("serate"): those stay in `GdG-Event-Bot`.
 
 ## 2. Workflows
-Both entry points call the same pipeline (`core/pipeline.py`: `create_article`, `revise_article`, `publish`, `discard`; blocking functions, `PipelineError` carries an Italian message for the user, `SettingsError` marks missing `.env` values).
+Both entry points call the same pipeline (`core/pipeline.py`: `create_article`, `create_card`, `revise_article`, `publish`, `discard`; blocking functions, `PipelineError` carries an Italian message for the user, `SettingsError` marks missing `.env` values).
 
 ### 2.1. Telegram bot (`main.py`, `bot/`)
 - Admin-only: every handler is restricted to `ADMIN_CHAT_ID`.
@@ -44,6 +44,7 @@ The skill interviews the user to refine the article vision (type, facts, audienc
 
 ### 2.3. CLI (`scripts/`)
 - `scripts/create_article.py --kind news|collab --brief FILE --images IMG [IMG ...] [--cover N] [--logo N] [--order N] [--date DD-MM-YYYY] [--provider gemini|claude] [--dry-run] [--output FILE]`. `--dry-run` writes the front matter and body (and the partner card, each preceded by a `<!-- FILE: <site path> -->` line) to a file or stdout without uploading or committing; it needs only the AI key. Exit codes: 0 ok, 1 pipeline error, 2 bad arguments or missing settings.
+- `scripts/create_card.py --name NAME --logo FILE --description TEXT [--article SLUG] [--order N] [--dry-run] [--output FILE]` creates a draft of the **partner card only** (no article, no AI: needs only R2 and GitHub settings; the description is at most 200 characters). `--article` is the slug of the collaboration news article already on the site: the card's `url` becomes `<ASTRO_BASE_URL>/news/<slug>/` and the command fails if no such article exists (without `--article` the card has no link). It is a draft of kind `card` on the branch `scheda/<card-slug>`, commit message `Bozza scheda <card-slug>`, published or discarded like any draft; its final link is the `/collaborazioni` page. A card cannot be revised: discard it and create a new one. Same exit codes as `create_article.py`.
 - `scripts/publish_article.py <id|slug> [--discard]` merges or discards a draft; `--list` shows the pending drafts.
 
 ## 3. Article Formats
@@ -62,15 +63,15 @@ Rules: the body never starts with `#` and never repeats the title or the cover (
 
 ### 3.2. Collaboration
 A collaboration produces **two files in the same draft branch**:
-- a news article (`src/content/news/<YYYY-MM-DD>-collaborazione-con-<partner-slug>.md`) in guided-flexible shape, modelled on the real article `collaborazione-con-ages-games` on the site: intro announcing the collaboration with **Partner** in bold; at least two sections (`##` or `###`) chosen from the brief (e.g. one per product or benefit, each with its image); a "how to use it" section with the partner link; a thank-you to the partner; `---`; closing with 🦅. Headings are not fixed; the prompt carries a trimmed style example (`COLLAB_STYLE_EXAMPLE`);
-- a partner card (`src/content/collaborazioni/<partner-slug>.md`), front matter only: `nome`, `logo` (R2 URL), `url` (optional, must be a valid URL), `descrizione` (at most 200 characters), `ordine: 100`.
+- a news article (`src/content/news/<YYYY-MM-DD>-collaborazione-con-<partner-slug>.md`) in guided-flexible shape, modelled on the real article `collaborazione-con-aces-games` on the site: intro announcing the collaboration with **Partner** in bold; at least two sections (`##` or `###`) chosen from the brief (e.g. one per product or benefit, each with its image); a "how to use it" section with the partner link; a thank-you to the partner; `---`; closing with 🦅. Headings are not fixed; the prompt carries a trimmed style example (`COLLAB_STYLE_EXAMPLE`);
+- a partner card (`src/content/collaborazioni/<partner-slug>.md`), front matter only: `nome`, `logo` (R2 URL), `url` (optional, **the address of the collaboration news article** `<ASTRO_BASE_URL>/news/<slug>/`, not the partner's website, which is linked inside the article), `descrizione` (at most 200 characters), `ordine: 100`.
 
 The site shows partner cards only on `/collaborazioni` (no per-card page, the body is never rendered). The cards folder does not exist on the site until the first card is committed.
 
 ### 3.3. Slugs, URLs and branches
 - The public URL has **no date**: `/news/<slug>/`. The site derives the slug from the file name by removing `^\d{4}-\d{2}(-\d{2})?-` (`articleSlug` in `GdG-Website/src/lib/urls.ts`).
 - **A duplicate slug breaks the website build.** Before committing, list the target folder through the GitHub API, compare *stripped* slugs and append `-2`, `-3`, … when needed. Same check for the partner-card file name.
-- Draft branches: `news/<slug>` and `collaborazione/<slug>`. Commit message `Bozza news <slug>` / `Bozza collaborazione <slug>`; merge message `Pubblica <branch>`.
+- Draft branches: `news/<slug>`, `collaborazione/<slug>` and `scheda/<card-slug>` (card only). Commit message `Bozza news <slug>` / `Bozza collaborazione <slug>`; merge message `Pubblica <branch>`.
 
 ## 4. Image Pipeline
 Ported from `GdG-Event-Bot/core/astro/storage.py`:
@@ -117,11 +118,11 @@ GdG-Article-Bot/
 │   ├── brief.py         # parse_markers: copertina: / logo: / ordine: lines of a brief
 │   ├── prompts.py       # system + task prompts (news, collab, revise, fix), COLLAB_STYLE_EXAMPLE
 │   ├── validate.py      # normalize + check_article + generate_valid (retry loop, 3 attempts)
-│   ├── pipeline.py      # create_article / revise_article / publish / discard (+ Draft, PipelineError)
+│   ├── pipeline.py      # create_article / create_card / revise_article / publish / discard (+ Draft, PipelineError)
 │   ├── db.py            # SQLite state of the drafts
 │   ├── ai/              # base.py (contract, schema, errors), gemini.py, claude.py, provider.py (get_provider)
 │   └── site/            # client.py (GitHub + R2 clients), storage.py (R2), github.py, content.py (slugs, front matter, draft lifecycle)
-├── scripts/             # create_article.py, publish_article.py
+├── scripts/             # create_article.py, create_card.py, publish_article.py
 ├── tests/               # mirrors the source tree; helpers in tests/support/
 ├── data/                # runtime: articles.db, briefs/, tmp/ (originals of the open drafts), logs/ (git-ignored)
 ├── docs/plans/          # IMPLEMENTATION_PLAN.md (history and rationale of the build)
@@ -137,7 +138,7 @@ SQLite `DATA_DIR/articles.db` (`core/db.py`, created by `init_db()`), table `art
 | Column | Type | Description |
 |---|---|---|
 | `id` | INTEGER PK | Draft id |
-| `kind` | TEXT | `news` or `collab` |
+| `kind` | TEXT | `news`, `collab` or `card` (partner card only) |
 | `slug` | TEXT | Final unique article slug (URL `/news/<slug>/`) |
 | `card_slug` | TEXT | Partner card file name (collaborations only) |
 | `branch` | TEXT | Draft branch on the website repo |

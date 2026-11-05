@@ -11,7 +11,7 @@ from core import config, db
 from core.ai.provider import get_provider
 from core.brief import parse_markers
 from core.site import content, storage
-from core.validate import ArticleError, generate_valid
+from core.validate import DESCRIPTION_LIMIT, ArticleError, generate_valid
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +85,11 @@ def _replace_images(body, urls):
     return re.sub(r"\]\(img:(\d+)\)", lambda match: f"]({urls[int(match.group(1)) - 1]})", body)
 
 
-def _render(kind, result, date_iso, image_urls, card_slug, logo_url, order):
-    """(estratto, markdown dell'articolo, markdown della scheda o None) per un risultato già validato."""
+def _render(kind, slug, result, date_iso, image_urls, card_slug, logo_url, order):
+    """(estratto, markdown dell'articolo, markdown della scheda o None) per un risultato già validato.
+
+    La scheda partner punta all'articolo della collaborazione (`url` = pagina news), non al sito del partner.
+    """
     cover = result.get("cover_index")
     cover_url = image_urls[cover - 1] if cover else None
     excerpt = result["excerpt"].strip() or content.make_excerpt(result["body"])
@@ -95,7 +98,7 @@ def _render(kind, result, date_iso, image_urls, card_slug, logo_url, order):
     card = None
     if kind == "collab":
         partner = result["partner"]
-        card = content.build_partner_card(partner["nome"].strip(), logo_url, partner.get("url"),
+        card = content.build_partner_card(partner["nome"].strip(), logo_url, content.public_url(slug),
                                           partner["descrizione"].strip(), order)
     return excerpt, markdown, card
 
@@ -191,7 +194,7 @@ def create_article(kind, brief, image_paths, cover=None, logo=None, order=None, 
     if dry_run:
         image_urls = [f"{DRY_RUN_HOST}/{slug}/img_{n}.jpg" for n in range(1, len(image_paths) + 1)]
         logo_url = f"{DRY_RUN_HOST}/{card_slug}/logo.png" if card_slug else None
-        excerpt, markdown, card = _render(kind, result, date_iso, image_urls, card_slug, logo_url, order)
+        excerpt, markdown, card = _render(kind, slug, result, date_iso, image_urls, card_slug, logo_url, order)
         return Draft(kind, slug, result["title"].strip(), excerpt, markdown, card_slug, card, dry_run=True,
                      date_iso=date_iso)
 
@@ -199,7 +202,7 @@ def create_article(kind, brief, image_paths, cover=None, logo=None, order=None, 
     image_urls = [storage.media_url(key) for key in keys]
     logo_key = _upload_logo(image_paths[logo_index - 1], card_slug) if kind == "collab" else None
     logo_url = storage.media_url(logo_key) if logo_key else None
-    excerpt, markdown, card = _render(kind, result, date_iso, image_urls, card_slug, logo_url, order)
+    excerpt, markdown, card = _render(kind, slug, result, date_iso, image_urls, card_slug, logo_url, order)
 
     draft_url, branch = content.create_draft(kind, slug, date_iso, markdown, card, card_slug)
     if not draft_url:
@@ -217,6 +220,70 @@ def create_article(kind, brief, image_paths, cover=None, logo=None, order=None, 
                  content.public_url(slug), article_id, date_iso=date_iso)
 
 
+def _check_card_fields(nome, logo_path, descrizione):
+    if not (nome or "").strip():
+        raise PipelineError("Manca il nome del partner")
+    if not (descrizione or "").strip():
+        raise PipelineError("Manca la descrizione del partner")
+    if len(descrizione.strip()) > DESCRIPTION_LIMIT:
+        raise PipelineError(f"La descrizione del partner supera {DESCRIPTION_LIMIT} caratteri ({len(descrizione.strip())})")
+    if not os.path.isfile(logo_path or ""):
+        raise PipelineError(f"Logo non trovato: {logo_path}")
+
+
+def _check_article_exists(article):
+    """Lo slug deve essere quello di un articolo già presente sul sito (la scheda punta a /news/<slug>/)."""
+    slugs = {content.strip_date(name) for name in content.existing_news_names()}
+    if article not in slugs:
+        raise PipelineError(f"Articolo '{article}' non trovato sul sito")
+
+
+def create_card(nome, logo_path, descrizione, article=None, order=None, dry_run=False):
+    """Crea la bozza della sola scheda partner (nessun articolo, nessuna AI); funzione bloccante.
+
+    `article` è lo slug dell'articolo news sulla collaborazione: la scheda ha `url` = /news/<slug>/ (se manca, niente link).
+
+    Il logo va su R2 come `collaborazioni/<scheda>/logo_<uuid8>.<ext>`; la bozza è il branch `scheda/<slug>`.
+    Con `dry_run` non carica nulla su R2 e non scrive su GitHub: restituisce solo il testo della scheda.
+    """
+    _check_settings("card_dry_run" if dry_run else "card")
+    _check_card_fields(nome, logo_path, descrizione)
+    nome, descrizione = nome.strip(), descrizione.strip()
+    article = (article or "").strip() or None
+    if article:
+        try:
+            _check_article_exists(article)
+        except PipelineError:
+            raise
+        except Exception as e:
+            if not dry_run:
+                raise PipelineError(f"Impossibile leggere le cartelle del sito su GitHub: {e}") from e
+            logger.warning("Dry run: esistenza dell'articolo non verificata (%s)", e)
+    url = content.public_url(article) if article else None
+    order = DEFAULT_ORDER if order is None else order
+
+    card_names = _existing_names(content.existing_card_names, tolerant=dry_run)
+    card_slug = content.unique_slug(content.slugify(nome), card_names, strip=False)
+
+    if dry_run:
+        card = content.build_partner_card(nome, f"{DRY_RUN_HOST}/{card_slug}/logo.png", url, descrizione, order)
+        return Draft(content.CARD_KIND, card_slug, nome, descrizione, "", card_slug, card, dry_run=True)
+
+    logo_key = _upload_logo(logo_path, card_slug)
+    card = content.build_partner_card(nome, storage.media_url(logo_key), url, descrizione, order)
+    draft_url, branch = content.create_card_draft(card_slug, card)
+    if not draft_url:
+        raise PipelineError("Creazione della bozza su GitHub fallita (il logo è già su R2)")
+    public_url = content.collaborations_url()
+    article_id = db.insert_article(
+        content.CARD_KIND, slug=card_slug, card_slug=card_slug, branch=branch, title=nome,
+        date_iso=date_type.today().isoformat(), draft_url=draft_url, public_url=public_url, logo_key=logo_key,
+        card_order=order, brief=descrizione,
+    )
+    return Draft(content.CARD_KIND, card_slug, nome, descrizione, "", card_slug, card, branch, draft_url, public_url,
+                 article_id)
+
+
 def _load_draft(article_id):
     article = db.get_article(article_id)
     if not article:
@@ -230,6 +297,8 @@ def revise_article(article_id, feedback, provider=None):
     """Rigenera il testo di una bozza secondo le indicazioni, sullo stesso branch e con le stesse immagini."""
     _check_settings("cli")
     article = _load_draft(article_id)
+    if article["kind"] == content.CARD_KIND:
+        raise PipelineError("Una scheda partner non si rigenera: scartala e creane una nuova")
     if not (feedback or "").strip():
         raise PipelineError("Servono le indicazioni su cosa cambiare")
     kind, paths = article["kind"], article["image_paths"]
@@ -251,7 +320,7 @@ def revise_article(article_id, feedback, provider=None):
         logo_key = _upload_logo(paths[logo_index - 1], article["card_slug"])
     logo_url = storage.media_url(logo_key) if logo_key else None
     order = article["card_order"] if article["card_order"] is not None else DEFAULT_ORDER
-    excerpt, markdown, card = _render(kind, result, article["date_iso"], image_urls, article["card_slug"], logo_url, order)
+    excerpt, markdown, card = _render(kind, article["slug"], result, article["date_iso"], image_urls, article["card_slug"], logo_url, order)
 
     draft_url = content.update_draft(kind, article["slug"], article["date_iso"], article["branch"], markdown, card,
                                      article["card_slug"])

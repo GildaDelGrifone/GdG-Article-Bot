@@ -83,6 +83,11 @@ class TestMissingSettings(unittest.TestCase):
         with patched_config(**{**self.FULL, "TELEGRAM_BOT_TOKEN": None, "ADMIN_CHAT_ID": None}):
             self.assertEqual(config.missing_settings("telegram"), ["TELEGRAM_BOT_TOKEN", "ADMIN_CHAT_ID"])
 
+    def test_cards_do_not_need_the_ai_key(self):
+        with patched_config(**{**self.FULL, "GEMINI_API_KEY": None, "R2_ACCOUNT_ID": None, "ASTRO_GITHUB_TOKEN": None}):
+            self.assertEqual(config.missing_settings("card_dry_run"), [])
+            self.assertEqual(config.missing_settings("card"), ["R2_ACCOUNT_ID", "ASTRO_GITHUB_TOKEN"])
+
     def test_nothing_missing(self):
         with patched_config(**self.FULL):
             self.assertEqual(config.missing_settings("telegram"), [])
