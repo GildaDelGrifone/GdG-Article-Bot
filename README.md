@@ -34,7 +34,7 @@ Bot che scrive gli **articoli di news e collaborazioni** del sito della **Gilda 
 | Tipo | File nel repo del sito | Contenuto |
 |---|---|---|
 | News | `src/content/news/AAAA-MM-GG-<slug>.md` | Introduzione, 2-4 sezioni `##`, immagini con didascalia, `---`, chiusura con 🦅 (300-600 parole) |
-| Collaborazione | news `…-collaborazione-con-<partner>.md` **+** scheda `src/content/collaborazioni/<partner>.md` | "Chi è", "Cosa significa per i soci", "Come approfittarne"; la scheda ha `nome`, `logo`, `url`, `descrizione` (max 200 caratteri) |
+| Collaborazione | news `…-collaborazione-con-<partner>.md` **+** scheda `src/content/collaborazioni/<partner>.md` | Introduzione col partner, almeno 2 sezioni scelte dal brief (es. una per prodotto o vantaggio), come approfittarne, ringraziamento, `---`, chiusura con 🦅; la scheda ha `nome`, `logo`, `url`, `descrizione` (max 200 caratteri), `ordine` |
 
 Il titolo, la data e la copertina li mostra già il sito: il testo dell'articolo non li ripete. L'URL pubblico è `…/news/<slug>/` (senza data).
 

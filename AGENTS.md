@@ -56,7 +56,7 @@ Front matter (Zod `articolo` schema): `title` (string), `date` (`YYYY-MM-DD`), `
 
 Body layout (free narrative, about 300-600 words, Italian):
 1. Intro paragraph with no heading; **Gilda del Grifone** in bold.
-2. Two to four `##` sections chosen from the brief. Images as `![alt](url)` followed by a short italic caption line.
+2. Two to four sections (`##` or `###`) chosen from the brief. Images as `![alt](url)` followed by a short italic caption line.
 3. A line with only `---`.
 4. Closing call to action (how to join, Telegram group, address, opening hours), ending with 🦅.
 
@@ -64,7 +64,7 @@ Rules: the body never starts with `#` and never repeats the title or the cover (
 
 ### 3.2. Collaboration
 A collaboration produces **two files in the same draft branch**:
-- a news article (`src/content/news/<YYYY-MM-DD>-collaborazione-con-<partner-slug>.md`) in partner-profile shape: intro announcing the collaboration with **Partner**, `## Chi è <Partner>`, `## Cosa significa per i soci` (bullet list of benefits), `## Come approfittarne` with the partner link, `---`, closing with 🦅;
+- a news article (`src/content/news/<YYYY-MM-DD>-collaborazione-con-<partner-slug>.md`) in guided-flexible shape, modelled on the real article `collaborazione-con-ages-games` on the site: intro announcing the collaboration with **Partner** in bold; at least two sections (`##` or `###`) chosen from the brief (e.g. one per product or benefit, each with its image); a "how to use it" section with the partner link; a thank-you to the partner; `---`; closing with 🦅. Headings are not fixed; the prompt carries a trimmed style example (`COLLAB_STYLE_EXAMPLE`);
 - a partner card (`src/content/collaborazioni/<partner-slug>.md`), front matter only: `nome`, `logo` (R2 URL), `url` (optional, must be a valid URL), `descrizione` (at most 200 characters), `ordine: 100`.
 
 The site shows partner cards only on `/collaborazioni` (no per-card page, the body is never rendered). The cards folder does not exist on the site until the first card is committed.
@@ -166,6 +166,7 @@ Template: `.env.example` (the real `.env` is git-ignored). Values are read at ca
 | `R2_BUCKET` | Bucket | `gdg-media` |
 | `R2_PUBLIC_URL` | Public bucket URL, no trailing slash | required |
 | `ASSOCIATION_ADDRESS`, `OPENING_HOURS`, `TELEGRAM_GROUP_URL`, `ARTICLE_CONTACTS` | Facts used in the article closing | see `.env.example` |
+| `BOOKING_BOT_NAME` | Telegram bot used to book tables (e.g. `Grifone Scriba`); optional, the AI mentions it only when relevant | empty |
 | `DATA_DIR` | Runtime folder | `data` |
 | `LOG_LEVEL` | `DEBUG`..`CRITICAL`; a typo falls back to `INFO` | `INFO` |
 
