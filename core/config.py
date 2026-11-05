@@ -60,6 +60,14 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")
 
+# --- Agente della chat Telegram (/scrivi) ---
+# Provider e modello dell'agente: se non indicati valgono quelli di AI_PROVIDER / del provider scelto
+AGENT_PROVIDER = os.getenv("AGENT_PROVIDER", "").strip().lower()
+AGENT_MODEL = os.getenv("AGENT_MODEL", "").strip()
+AGENT_MAX_STEPS = _env_int("AGENT_MAX_STEPS", 12)  # chiamate al modello per ogni messaggio dell'utente
+AGENT_MAX_MESSAGES = _env_int("AGENT_MAX_MESSAGES", 60)  # oltre questa lunghezza la sessione riparte da zero
+AGENT_IDLE_HOURS = _env_int("AGENT_IDLE_HOURS", 12)  # una sessione ferma da tanto riparte da zero
+
 # --- Sito (repo GdG-Website) ---
 ASTRO_GITHUB_REPO = os.getenv("ASTRO_GITHUB_REPO", "GildaDelGrifone/GdG-Website")
 ASTRO_GITHUB_BRANCH = os.getenv("ASTRO_GITHUB_BRANCH", "main")
@@ -100,14 +108,23 @@ def _ai_key_name(provider=None):
     return "ANTHROPIC_API_KEY" if (provider or AI_PROVIDER) == "claude" else "GEMINI_API_KEY"
 
 
+def agent_provider():
+    """Il provider dell'agente: AGENT_PROVIDER se valido, altrimenti AI_PROVIDER."""
+    return AGENT_PROVIDER if AGENT_PROVIDER in AI_PROVIDERS else AI_PROVIDER
+
+
 def missing_settings(mode):
-    """Nomi delle impostazioni mancanti per `mode`: "dry_run", "cli", "telegram", "card_dry_run" o "card".
+    """Nomi delle impostazioni mancanti per `mode`: "dry_run", "cli", "telegram", "card_dry_run", "card" o "agent".
 
     dry_run: solo la chiave dell'AI scelta. cli: in più R2 e GitHub. telegram: in più token e chat admin.
+    agent: come cli, più la chiave del provider dell'agente se è un altro.
     Le schede partner non usano l'AI: card_dry_run non richiede nulla, card solo R2 e GitHub.
     """
     names = [] if mode in ("card", "card_dry_run") else [_ai_key_name()]
-    if mode in ("cli", "telegram", "card"):
+    if mode == "agent":
+        # l'agente scrive e crea bozze: serve anche la chiave del suo provider, se diverso da quello degli articoli
+        names += [_ai_key_name(agent_provider())] if agent_provider() != AI_PROVIDER else []
+    if mode in ("cli", "telegram", "card", "agent"):
         names += ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "R2_PUBLIC_URL",
                   "ASTRO_GITHUB_REPO", "ASTRO_GITHUB_TOKEN"]
     if mode == "telegram":

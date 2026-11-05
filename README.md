@@ -83,7 +83,18 @@ Solo la chat `ADMIN_CHAT_ID` può usare il bot.
 
 Nel testo puoi scrivere, in righe separate, `copertina: 2` per scegliere la foto di copertina e `logo: 3` per indicare il logo del partner. Le foto mandate come *file* (documento) mantengono la qualità originale.
 
-Sotto la bozza trovi `[Pubblica sul sito]`, `[✏️ Rivedi]` (scrivi cosa cambiare e l'AI rigenera) e `[🗑️ Scarta]`.
+Sotto la bozza trovi `[Pubblica sul sito]`, `[✏️ Rivedi]` (scrivi cosa cambiare e l'AI rigenera) e `[🗑️ Scarta]`. Dopo la pubblicazione il bot controlla che la pagina sia online e te lo scrive.
+
+### Assistente in chat: `/scrivi`
+
+| Comando | Cosa fa |
+|---|---|
+| `/scrivi` | Apre la conversazione con l'assistente (la stessa cosa della skill, dentro Telegram) |
+| `/fine` (o `/reset`) | **Azzera la conversazione** (cronologia e foto): usalo quando hai finito, così non si spendono token per un contesto che non serve. Le bozze create restano |
+
+Mandagli note, link di post del canale (`https://t.me/canale/123`) e foto, anche in più messaggi (foto e testo arrivati insieme sono un solo turno). Ti fa le domande che mancano, crea le bozze, le controlla e corregge, poi le mostra con i pulsanti `[Pubblica]` `[Rivedi]` `[Scarta]`: **pubblica solo il pulsante**, l'assistente non ha modo di farlo. Scrivere `/news` o `/collab` chiude l'assistente. La conversazione riparte da sola dopo `AGENT_MAX_MESSAGES` messaggi o `AGENT_IDLE_HOURS` ore di pausa.
+
+Usa `AGENT_PROVIDER` / `AGENT_MODEL` (default: `AI_PROVIDER`) e richiede anche la chiave API di quel provider. Per provarlo dal terminale senza Telegram: `.venv/bin/python scripts/agent_chat.py [--provider claude]`.
 
 ## 🤖 Uso con la skill di Claude Code
 

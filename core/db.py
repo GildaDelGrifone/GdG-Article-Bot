@@ -37,6 +37,21 @@ CREATE TABLE IF NOT EXISTS articles (
 )
 """
 
+# Conversazione dell'agente di /scrivi: una riga per chat. `messages` è nel formato nativo del provider (solo in aggiunta,
+# mai modificata a metà), `system` è il prompt di sistema congelato all'apertura della sessione, `images` l'elenco dei
+# file delle immagini ricevute (il numero N è la posizione N-1).
+CREATE_AGENT_SESSIONS = """
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    chat_id INTEGER PRIMARY KEY,
+    provider TEXT NOT NULL,
+    model TEXT,
+    system TEXT NOT NULL,
+    messages TEXT NOT NULL DEFAULT '[]',
+    images TEXT NOT NULL DEFAULT '[]',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
 # Colonne aggiunte dopo la prima versione: (nome, definizione). init_db() le aggiunge ai database esistenti.
 COLUMN_MIGRATIONS = []
 
@@ -68,6 +83,7 @@ def transaction():
 def init_db():
     with transaction() as cur:
         cur.execute(CREATE_ARTICLES)
+        cur.execute(CREATE_AGENT_SESSIONS)
         existing = {row["name"] for row in cur.execute("PRAGMA table_info(articles)")}
         for name, definition in COLUMN_MIGRATIONS:
             if name not in existing:
@@ -132,3 +148,37 @@ def list_drafts():
     with transaction() as cur:
         cur.execute("SELECT * FROM articles WHERE status = 'draft' ORDER BY id DESC")
         return [_decode(row) for row in cur.fetchall()]
+
+
+def get_agent_session(chat_id):
+    """La sessione dell'agente di `chat_id` (messages e images già decodificati) o None."""
+    with transaction() as cur:
+        cur.execute("SELECT * FROM agent_sessions WHERE chat_id = ?", (chat_id,))
+        row = cur.fetchone()
+    if row is None:
+        return None
+    session = dict(row)
+    for field in ("messages", "images"):
+        try:
+            session[field] = json.loads(session.get(field) or "[]")
+        except ValueError:
+            session[field] = []
+    return session
+
+
+def save_agent_session(chat_id, provider, model, system, messages, images):
+    """Crea o sostituisce la sessione di `chat_id`."""
+    with transaction() as cur:
+        cur.execute(
+            "INSERT INTO agent_sessions (chat_id, provider, model, system, messages, images, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(chat_id) DO UPDATE SET provider = excluded.provider, model = excluded.model, "
+            "system = excluded.system, messages = excluded.messages, images = excluded.images, "
+            "updated_at = CURRENT_TIMESTAMP",
+            (chat_id, provider, model, system, json.dumps(messages, ensure_ascii=False), json.dumps(images)),
+        )
+
+
+def delete_agent_session(chat_id):
+    with transaction() as cur:
+        cur.execute("DELETE FROM agent_sessions WHERE chat_id = ?", (chat_id,))

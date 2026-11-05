@@ -12,6 +12,8 @@ BUTTON_DISCARD = "🗑️ Scarta"
 COMMAND_DESCRIPTIONS = [
     ("news", "Scrivi una news per il sito"),
     ("collab", "Scrivi un articolo di collaborazione"),
+    ("scrivi", "Scrivi articoli chattando con l'assistente"),
+    ("fine", "Chiudi l'assistente e azzera la cronologia"),
     ("genera", "Genera la bozza con foto e testo ricevuti"),
     ("annulla", "Annulla la bozza in corso"),
     ("bozze", "Mostra le bozze in attesa"),
@@ -28,7 +30,11 @@ HELP = (
     "<code>copertina: 2</code> immagine di copertina\n"
     "<code>logo: 3</code> logo del partner (collaborazioni)\n"
     "<code>ordine: 10</code> posizione della scheda partner\n\n"
-    "/annulla ferma tutto, /bozze mostra le bozze in attesa."
+    "/annulla ferma tutto, /bozze mostra le bozze in attesa.\n\n"
+    "💬 <b>/scrivi</b>: in alternativa parla con l'assistente in chat. Mandagli note, link di post del canale e foto: "
+    "ti fa le domande che mancano, crea le bozze, le controlla e te le mostra con i pulsanti. "
+    "Pubblica solo il pulsante. <b>/fine</b> (o /reset) azzera la conversazione: usalo quando hai finito, "
+    "così non si consumano token inutilmente."
 )
 
 START_NEWS = (
@@ -101,3 +107,30 @@ REVISE_MARKER = "Cosa vuoi cambiare nella bozza #"
 REVISING = "⏳ Aggiorno la bozza..."
 REVISED = "✅ Bozza aggiornata."
 POPUP_WORKING = "⏳ Un attimo..."
+
+
+# --- assistente (/scrivi) ---------------------------------------------------------------------------------------------
+START_AGENT = (
+    "💬 <b>Assistente articoli</b>\nScrivimi cosa vuoi pubblicare: puoi mandare note, link di post del canale "
+    "(<code>https://t.me/canale/123</code>) e foto, anche in più messaggi. Ti faccio le domande che mancano, creo le "
+    "bozze e te le mostro qui con i pulsanti: pubblica solo il pulsante.\n"
+    "Quando hai finito scrivi /fine: azzera la conversazione (le bozze restano)."
+)
+AGENT_ALREADY_OPEN = "💬 La sessione è già aperta, continua pure. /fine per azzerarla e ripartire da zero."
+AGENT_ENDED = "🧹 Sessione azzerata: cronologia e foto cancellate (le bozze create restano). Per ricominciare: /scrivi."
+AGENT_NO_SESSION = "Nessuna sessione aperta: scrivi /scrivi per iniziare."
+AGENT_SESSION_RESTARTED = (
+    "ℹ️ La conversazione precedente era troppo lunga o ferma da molto: riparto da zero (le bozze in attesa restano)."
+)
+
+
+def format_missing_settings(names):
+    return "❌ L'assistente non è configurato, mancano nel file .env: " + html.escape(", ".join(names))
+
+
+def format_live_ok(url):
+    return f"✅ Online: {html.escape(url)}"
+
+
+def format_live_missing(url):
+    return f"⚠️ La pagina non è ancora raggiungibile: {html.escape(url)}\nIl deploy può richiedere qualche minuto in più, riprova a controllare tra poco."

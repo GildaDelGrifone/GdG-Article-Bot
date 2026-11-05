@@ -17,7 +17,8 @@ class TestBuildApplication(unittest.TestCase):
         early = [type(h).__name__ for h in application.handlers[-1]]
         normal = [type(h).__name__ for h in application.handlers[0]]
         self.assertEqual(early, ["MessageHandler"])  # risposte a «Rivedi», prima della conversazione
-        self.assertEqual(normal, ["ConversationHandler", "CallbackQueryHandler", "CommandHandler", "CommandHandler"])
+        self.assertEqual(normal, ["ConversationHandler", "CallbackQueryHandler", "CommandHandler", "CommandHandler",
+                                  "CommandHandler", "CommandHandler", "MessageHandler", "MessageHandler", "MessageHandler"])
         self.assertIn(main.on_error, application.error_handlers)
 
     def test_callback_handler_only_takes_article_buttons(self):

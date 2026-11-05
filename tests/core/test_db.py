@@ -73,5 +73,29 @@ class TestDb(TempDBMixin, unittest.TestCase):
         self.assertEqual(db.list_drafts(), [])
 
 
+class TestAgentSessions(TempDBMixin, unittest.TestCase):
+    def test_missing_session(self):
+        self.assertIsNone(db.get_agent_session(1))
+
+    def test_save_read_replace_and_delete(self):
+        db.save_agent_session(1, "gemini", "m", "SYS", [{"role": "user", "text": "è"}], [{"number": 1, "path": "a"}])
+        session = db.get_agent_session(1)
+        self.assertEqual((session["provider"], session["model"], session["system"]), ("gemini", "m", "SYS"))
+        self.assertEqual(session["messages"], [{"role": "user", "text": "è"}])
+        self.assertEqual(session["images"], [{"number": 1, "path": "a"}])
+        db.save_agent_session(1, "claude", "m2", "SYS2", [], [])
+        self.assertEqual(db.get_agent_session(1)["provider"], "claude")
+        self.assertEqual(db.get_agent_session(1)["messages"], [])
+        db.delete_agent_session(1)
+        self.assertIsNone(db.get_agent_session(1))
+        db.delete_agent_session(1)  # già assente: nessun errore
+
+    def test_sessions_are_per_chat(self):
+        db.save_agent_session(1, "gemini", "m", "A", [], [])
+        db.save_agent_session(2, "gemini", "m", "B", [], [])
+        db.delete_agent_session(1)
+        self.assertEqual(db.get_agent_session(2)["system"], "B")
+
+
 if __name__ == "__main__":
     unittest.main()

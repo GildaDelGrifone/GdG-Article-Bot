@@ -88,6 +88,22 @@ class TestMissingSettings(unittest.TestCase):
             self.assertEqual(config.missing_settings("card_dry_run"), [])
             self.assertEqual(config.missing_settings("card"), ["R2_ACCOUNT_ID", "ASTRO_GITHUB_TOKEN"])
 
+    def test_agent_needs_r2_github_and_the_key_of_its_provider(self):
+        with patched_config(**{**self.FULL, "R2_ACCOUNT_ID": None, "ASTRO_GITHUB_TOKEN": None}):
+            self.assertEqual(config.missing_settings("agent"), ["R2_ACCOUNT_ID", "ASTRO_GITHUB_TOKEN"])
+        with patched_config(**{**self.FULL, "AGENT_PROVIDER": "claude", "ANTHROPIC_API_KEY": None}):
+            self.assertEqual(config.missing_settings("agent"), ["ANTHROPIC_API_KEY"])
+        with patched_config(**{**self.FULL, "AGENT_PROVIDER": "claude", "ANTHROPIC_API_KEY": "k", "GEMINI_API_KEY": None}):
+            self.assertEqual(config.missing_settings("agent"), ["GEMINI_API_KEY"])  # anche la chiave per scrivere gli articoli
+
+    def test_agent_provider_falls_back_to_ai_provider(self):
+        with patched_config(AI_PROVIDER="claude", AGENT_PROVIDER=""):
+            self.assertEqual(config.agent_provider(), "claude")
+        with patched_config(AI_PROVIDER="claude", AGENT_PROVIDER="gemini"):
+            self.assertEqual(config.agent_provider(), "gemini")
+        with patched_config(AI_PROVIDER="gemini", AGENT_PROVIDER="boh"):
+            self.assertEqual(config.agent_provider(), "gemini")
+
     def test_nothing_missing(self):
         with patched_config(**self.FULL):
             self.assertEqual(config.missing_settings("telegram"), [])

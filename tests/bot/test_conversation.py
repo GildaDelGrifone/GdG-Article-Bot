@@ -40,6 +40,12 @@ class TestStart(ConversationTestCase):
         self.assertIn("Nuova news", update.message.reply_text.call_args.args[0])
         self.assertEqual(update.message.reply_text.call_args.kwargs["parse_mode"], "HTML")
 
+    async def test_starting_closes_the_agent_session(self):
+        from core.agent import loop
+        db.save_agent_session(int(ADMIN_CHAT_ID), "gemini", "m", "SYS", [], [])
+        await self.start()
+        self.assertEqual(loop.session_status(int(ADMIN_CHAT_ID)), "none")
+
     async def test_collab_asks_for_the_logo(self):
         update, _ = await self.start(conv.start_collab)
         self.assertEqual(self.draft["kind"], "collab")

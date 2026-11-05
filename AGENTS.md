@@ -39,6 +39,14 @@ Both entry points call the same pipeline (`core/pipeline.py`: `create_article`, 
   - **Rivedi** asks for feedback with a ForceReply and regenerates on the same branch, reusing the already uploaded images.
   - **Scarta** deletes the branch (a missing branch means it was already published).
 
+### 2.1b. Chat assistant (`/scrivi`, `bot/agent.py`, `core/agent/`)
+The skill's flow inside Telegram, for use where Claude Code is not available (the k3s pod). A tool-calling agent (Claude or Gemini: `AGENT_PROVIDER` / `AGENT_MODEL`, default `AI_PROVIDER`) whose tools wrap the pipeline: `fetch_telegram_post`, `create_article`, `create_card`, `show_draft`, `fix_draft` (exact single-occurrence replacements through pull → push), `revise_draft`, `list_drafts`, `request_publication`, `check_live` (only `ASTRO_BASE_URL`). **There is no tool that publishes or discards**: `request_publication` only marks a draft to be sent with the `[Pubblica][Rivedi][Scarta]` buttons, so a Telegram post with instructions inside cannot put anything online. The article text is still written by `create_article` / `revise_draft`, never by the agent.
+- `/scrivi` opens a session (and closes a `/news`/`/collab` collection); `/news` and `/collab` close it. **`/fine` (alias `/reset`) wipes the session by hand** (history and photos; drafts stay) so no tokens are spent on a finished conversation. A session also restarts after `AGENT_MAX_MESSAGES` messages or `AGENT_IDLE_HOURS` idle hours (the user is told), or if provider/model change.
+- Messages (text, photos, image documents) are collected for ~3 s so an album plus text is one turn; one turn runs up to `AGENT_MAX_STEPS` model calls; replies are plain text split under 4096 characters; drafts are sent as cards with buttons.
+- History is stored in the provider's native format in `agent_sessions` and is append-only (never trimmed in the middle: Claude needs unchanged thinking blocks, Gemini its `thought_signature`s); the system prompt and the tool list are frozen at session start. A failed turn is rolled back. Claude: no forced `tool_choice`, no sampling parameters, same `effort` rule as `core/ai/claude.py`. Gemini: `automatic_function_calling` disabled.
+- After **Pubblica** (any flow) the bot checks the final page after 2 minutes (retry once after 2 more) and writes the result.
+- The system prompt (`core/agent/prompts.py`) restates the rules of `.claude/skills/write-article/SKILL.md`: **keep the two aligned**. `scripts/agent_chat.py` runs the same loop from the terminal (`--provider`, `/foto <file>`, `/fine`).
+
 ### 2.2. Claude skill (`.claude/skills/write-article/`)
 The skill is the main way to use the project. It reads the user's notes and Telegram channel posts (`scripts/fetch_telegram.py`), interviews the user for what is missing, writes one `data/briefs/<name>.md` per article (several articles can be requested at once) and asks for a single yes. Then it runs the CLI for real (the draft branch is the preview; a dry run only on request), **checks each draft against the brief** (typos, invented facts, card description) and fixes it: small fixes with `scripts/edit_draft.py pull` → Edit → `push`, bigger rewrites with `edit_draft.py revise`. It publishes only on an explicit yes and then checks that the pages answer 200. **The skill never writes an article from scratch**: the text always comes from the configured AI provider, so both paths behave the same.
 
@@ -47,6 +55,7 @@ The skill is the main way to use the project. It reads the user's notes and Tele
 - `scripts/create_card.py --name NAME --logo FILE --description TEXT [--article SLUG] [--order N] [--dry-run] [--output FILE]` creates a draft of the **partner card only** (no article, no AI: needs only R2 and GitHub settings; the description is at most 200 characters). `--article` is the slug of the collaboration news article already on the site: the card's `url` becomes `<ASTRO_BASE_URL>/news/<slug>/` and the command fails if no such article exists (without `--article` the card has no link). It is a draft of kind `card` on the branch `scheda/<card-slug>`, commit message `Bozza scheda <card-slug>`, published or discarded like any draft; its final link is the `/collaborazioni` page. A card cannot be revised: discard it and create a new one. Same exit codes as `create_article.py`.
 - `scripts/publish_article.py <id|slug> [--discard]` merges or discards a draft; `--list` shows the pending drafts.
 - `scripts/edit_draft.py show|pull|push|revise <id|slug>` works on an existing draft without publishing it. `show` prints the files as they are on the draft branch (`<!-- FILE: <site path> -->` before each). `pull [--dir DIR]` writes `articolo.md` (and `scheda.md` for a collaboration or a card) to `drafts/<id>/`. `push [--dir DIR]` validates the files with the same rules as the AI output (`validate.check_body`: sections, one `---`, closing 🦅, only `img:N` images, no bare URLs; title ≤ 80, excerpt ≤ 160, card description ≤ 200, valid `date`) and commits them to the draft branch; R2 image addresses are mapped back to `img:N`, the corrected body is saved in `last_body` (so a later Rivedi starts from it) and a changed `date` renames the article file (`github.delete_file` removes the old one). `revise --feedback TEXT [--provider P]` is the CLI version of Rivedi. Needs only GitHub/R2 settings, except `revise` (AI key). Published or discarded drafts give an error.
+- `scripts/agent_chat.py [--provider P] [--model M]` talks to the `/scrivi` assistant from the terminal (same loop and tools; `/foto <file>` attaches images, `/fine` wipes the session, `/esci` quits; uses chat id 0, separate from the bot's session). The drafts it creates are real; it cannot publish.
 - `scripts/fetch_telegram.py <https://t.me/channel/N> [--out DIR]` reads a public channel post through its embed page (`core/telegram_post.py`, no login): saves `post.md` and `img_N.jpg` in `data/telegram/<channel>-<N>/` and prints the date as `GG-MM-AAAA` (Europe/Rome, ready for `--date`), the photos, the links and the text.
 
 ## 3. Article Formats
@@ -111,6 +120,7 @@ GdG-Article-Bot/
 ├── bot/                 # Telegram layer (entry points)
 │   ├── auth.py          # admin_only decorator
 │   ├── conversation.py  # /news /collab ConversationHandler: collect photos + text, /genera, /annulla
+│   ├── agent.py         # /scrivi, /fine: chat assistant (message intake with debounce, turns, cards)
 │   ├── callbacks.py     # [Pubblica] [Rivedi] [Scarta] buttons and the Rivedi reply handler
 │   ├── commands.py      # /help, /bozze
 │   ├── cards.py         # draft card text + send helper
@@ -123,7 +133,8 @@ GdG-Article-Bot/
 │   ├── validate.py      # normalize + check_article + generate_valid (retry loop, 3 attempts)
 │   ├── pipeline.py      # create_article / create_card / revise_article / show_draft / pull_draft / push_draft / publish / discard (+ Draft, PipelineError)
 │   ├── telegram_post.py # reads a public Telegram channel post (text, date, photos) for fetch_telegram.py
-│   ├── db.py            # SQLite state of the drafts
+│   ├── db.py            # SQLite state of the drafts and of the agent sessions
+│   ├── agent/           # llm.py (interface), claude_llm.py, gemini_llm.py, tools.py, prompts.py, loop.py (run_turn, sessions)
 │   ├── ai/              # base.py (contract, schema, errors), gemini.py, claude.py, provider.py (get_provider)
 │   └── site/            # client.py (GitHub + R2 clients), storage.py (R2), github.py, content.py (slugs, front matter, draft lifecycle)
 ├── scripts/             # create_article.py, create_card.py, edit_draft.py, publish_article.py, fetch_telegram.py
@@ -161,6 +172,8 @@ SQLite `DATA_DIR/articles.db` (`core/db.py`, created by `init_db()`), table `art
 | `chat_id`, `message_id` | INTEGER | Draft card in Telegram |
 | `created_at` | TIMESTAMP | Default `CURRENT_TIMESTAMP` |
 
+Table `agent_sessions` (`chat_id` PK, `provider`, `model`, `system`, `messages` JSON in the provider's native format, `images` JSON `[{number, path}]`, `updated_at`): one row per chat, created by `init_db()` (`get/save/delete_agent_session`).
+
 Schema changes: add the column to `CREATE TABLE` *and* to `COLUMN_MIGRATIONS` (`(name, definition)` pairs applied by `init_db()` to existing databases).
 
 ## 8. Environment Variables
@@ -173,6 +186,8 @@ Template: `.env.example` (the real `.env` is git-ignored). Values are read at ca
 | `AI_PROVIDER` | `gemini` or `claude` | `gemini` |
 | `GEMINI_API_KEY`, `GEMINI_MODEL` | Gemini credentials / model | `gemini-3.1-flash-lite` |
 | `ANTHROPIC_API_KEY`, `CLAUDE_MODEL` | Claude credentials / model | `claude-sonnet-5-5` |
+| `AGENT_PROVIDER`, `AGENT_MODEL` | Provider / model of the `/scrivi` assistant | `AI_PROVIDER` / that provider's model |
+| `AGENT_MAX_STEPS`, `AGENT_MAX_MESSAGES`, `AGENT_IDLE_HOURS` | Model calls per user message / messages and idle hours after which a session restarts | `12` / `60` / `12` |
 | `ASTRO_GITHUB_REPO` | Website repo | `GildaDelGrifone/GdG-Website` |
 | `ASTRO_GITHUB_BRANCH` | Branch the site deploys from | `main` |
 | `ASTRO_GITHUB_TOKEN` | Fine-grained token, Contents read/write on the website repo only | required |

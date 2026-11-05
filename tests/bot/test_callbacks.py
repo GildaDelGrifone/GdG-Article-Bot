@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from telegram import ForceReply
@@ -39,6 +40,19 @@ class TestPublishAndDiscard(CallbackTestCase):
         self.assertIn("PUBBLICATO", kwargs["text"])
         self.assertIn("https://sito/news/festa/", kwargs["text"])
         self.assertIsNone(kwargs["reply_markup"])
+
+    async def test_publish_schedules_the_live_check(self):
+        with patch("bot.callbacks.pipeline.publish", return_value="https://sito/news/festa/"):
+            await self.press("art_publish_7")
+        run_once = self.context.job_queue.run_once
+        run_once.assert_called_once()
+        self.assertEqual(run_once.call_args.args[1], callbacks.LIVE_CHECK_DELAY)
+        self.assertEqual(run_once.call_args.kwargs["data"]["url"], "https://sito/news/festa/")
+
+    async def test_failed_publish_schedules_no_check(self):
+        with patch("bot.callbacks.pipeline.publish", side_effect=PipelineError("no")):
+            await self.press("art_publish_7")
+        self.context.job_queue.run_once.assert_not_called()
 
     async def test_publish_error_keeps_the_buttons_for_a_retry(self):
         with patch("bot.callbacks.pipeline.publish", side_effect=PipelineError("merge <fallito>")):
@@ -189,3 +203,29 @@ class TestRevisionReply(CallbackTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLiveCheck(CallbackTestCase):
+    def job_context(self, attempt):
+        context = make_context()
+        context.job = SimpleNamespace(data={"url": "https://s/x/", "chat_id": 9, "attempt": attempt})
+        return context
+
+    async def test_reachable_page_is_reported(self):
+        context = self.job_context(1)
+        with patch("bot.callbacks.storage.is_reachable", return_value=True):
+            await callbacks._check_live(context)
+        self.assertIn("✅", context.bot.send_message.call_args.args[1])
+        context.job_queue.run_once.assert_not_called()
+
+    async def test_first_failure_retries_once_then_warns(self):
+        first = self.job_context(1)
+        with patch("bot.callbacks.storage.is_reachable", return_value=False):
+            await callbacks._check_live(first)
+        first.bot.send_message.assert_not_awaited()
+        self.assertEqual(first.job_queue.run_once.call_args.kwargs["data"]["attempt"], 2)
+        last = self.job_context(2)
+        with patch("bot.callbacks.storage.is_reachable", return_value=False):
+            await callbacks._check_live(last)
+        self.assertIn("⚠️", last.bot.send_message.call_args.args[1])
+        last.job_queue.run_once.assert_not_called()

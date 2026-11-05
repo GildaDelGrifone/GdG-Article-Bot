@@ -10,14 +10,15 @@ from bot.auth import admin_only
 from bot.cards import card_text_from_draft, send_card
 from core import config, db, pipeline
 from core.ai.base import AIQuotaError
+from core.agent.loop import reset_session
 from core.ai.provider import get_provider
 
 logger = logging.getLogger(__name__)
 
 COLLECTING = 0
 DRAFT_KEY = "draft"
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-MIME_EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".jfif", ".png", ".webp", ".avif"}
+MIME_EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/avif": ".avif"}
 
 
 def _inbox(update):
@@ -38,6 +39,7 @@ def _extension_for_document(document):
 
 async def _start(update, context, kind, intro):
     _clear(update, context)
+    reset_session(update.effective_chat.id)  # una sola modalità alla volta: /news e /collab chiudono l'assistente
     folder = _inbox(update)
     os.makedirs(folder, exist_ok=True)
     context.user_data[DRAFT_KEY] = {"kind": kind, "images": [], "texts": [], "folder": folder}
@@ -145,8 +147,11 @@ async def reject_other(update, context):
     return COLLECTING
 
 
-def build_conversation():
-    """Il ConversationHandler di /news e /collab (creato all'avvio, quando ADMIN_CHAT_ID è già noto)."""
+def build_conversation(extra_fallbacks=()):
+    """Il ConversationHandler di /news e /collab (creato all'avvio, quando ADMIN_CHAT_ID è già noto).
+
+    `extra_fallbacks`: comandi che interrompono la raccolta (es. /scrivi, che passa all'assistente).
+    """
     admin = filters.Chat(chat_id=int(config.ADMIN_CHAT_ID))
     return ConversationHandler(
         entry_points=[CommandHandler("news", start_news, filters=admin), CommandHandler("collab", start_collab, filters=admin)],
@@ -160,6 +165,6 @@ def build_conversation():
                 MessageHandler(admin & ~filters.COMMAND, reject_other),
             ],
         },
-        fallbacks=[CommandHandler("annulla", cancel, filters=admin)],
+        fallbacks=[CommandHandler("annulla", cancel, filters=admin), *extra_fallbacks],
         allow_reentry=True,
     )

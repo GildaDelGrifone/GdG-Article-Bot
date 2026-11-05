@@ -18,3 +18,9 @@ async def send_card(message, text, article_id):
     """Invia la scheda con i pulsanti Pubblica / Rivedi / Scarta e restituisce il messaggio inviato."""
     return await message.reply_text(text, parse_mode="HTML", reply_markup=draft_keyboard(article_id),
                                     disable_web_page_preview=True)
+
+
+async def send_card_to_chat(bot, chat_id, text, article_id):
+    """Come send_card, ma senza un messaggio a cui rispondere (usato fuori dagli handler, es. dall'agente)."""
+    return await bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=draft_keyboard(article_id),
+                                  disable_web_page_preview=True)

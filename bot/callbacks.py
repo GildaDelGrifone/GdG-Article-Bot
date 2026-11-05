@@ -11,6 +11,7 @@ from bot.auth import admin_only
 from bot.cards import card_text_from_draft, send_card
 from bot.keyboards import DISCARD_PREFIX, PUBLISH_PREFIX, REVISE_PREFIX, draft_keyboard
 from core import db, pipeline
+from core.site import storage
 from core.ai.base import AIQuotaError
 from core.ai.provider import get_provider
 
@@ -35,17 +36,42 @@ async def _append_to_card(query, suffix, keep_keyboard=False):
             raise
 
 
+LIVE_CHECK_DELAY = 120  # secondi tra la pubblicazione e il controllo della pagina (il deploy ne richiede circa 1-2 minuti)
+LIVE_CHECK_ATTEMPTS = 2
+
+
+async def _check_live(context):
+    """Job: controlla che la pagina pubblicata risponda; al primo fallimento riprova una volta."""
+    data = context.job.data
+    if await asyncio.to_thread(storage.is_reachable, data["url"]):
+        await context.bot.send_message(data["chat_id"], texts.format_live_ok(data["url"]), parse_mode="HTML",
+                                       disable_web_page_preview=True)
+    elif data["attempt"] < LIVE_CHECK_ATTEMPTS:
+        context.job_queue.run_once(_check_live, LIVE_CHECK_DELAY, data={**data, "attempt": data["attempt"] + 1})
+    else:
+        await context.bot.send_message(data["chat_id"], texts.format_live_missing(data["url"]), parse_mode="HTML",
+                                       disable_web_page_preview=True)
+
+
+def _schedule_live_check(context, query, url):
+    queue = getattr(context, "job_queue", None)
+    if queue is None or not url or not query.message:
+        return
+    queue.run_once(_check_live, LIVE_CHECK_DELAY, data={"url": url, "chat_id": query.message.chat_id, "attempt": 1})
+
+
 async def _publish(query, article_id):
     try:
         url = await asyncio.to_thread(pipeline.publish, article_id)
     except pipeline.PipelineError as e:
         await _append_to_card(query, texts.format_action_error(e), keep_keyboard=True)
-        return
+        return None
     except Exception:
         logger.exception("Pubblicazione fallita")
         await _append_to_card(query, texts.format_action_error(texts.GENERIC_ERROR), keep_keyboard=True)
-        return
+        return None
     await _append_to_card(query, texts.format_published_suffix(url))
+    return url
 
 
 async def _discard(query, article_id):
@@ -79,7 +105,9 @@ async def handle_callback_query(update, context):
     for prefix, handler in ROUTES:
         if data.startswith(prefix) and data[len(prefix):].isdigit():
             await query.answer(texts.POPUP_WORKING if handler is not _ask_revision else None)
-            await handler(query, int(data[len(prefix):]))
+            result = await handler(query, int(data[len(prefix):]))
+            if handler is _publish:
+                _schedule_live_check(context, query, result)
             return
     await query.answer()
 
