@@ -7,7 +7,7 @@ Bot che scrive gli **articoli di news e collaborazioni** del sito della **Gilda 
 - **Due tipi di articolo**: *news* e *collaborazione* (articolo + scheda partner per la pagina `/collaborazioni`).
 - **Due AI intercambiabili**: `AI_PROVIDER=gemini` oppure `AI_PROVIDER=claude`.
 - **Le AI vedono le immagini**: scrivono i testi alternativi, mettono ogni foto dove serve e scelgono la copertina (a meno che tu non la indichi).
-- **Immagini su Cloudflare R2**, ridimensionate a 1600 px, come per le serate.
+- **Immagini su Cloudflare R2**, ridimensionate a 1600 px, come per le serate. Accetta qualunque formato (JPEG, PNG, WEBP, AVIF…): le converte da sole.
 - **Bozza → Pubblica**: l'articolo nasce su un branch del repo del sito; `Pubblica` fa il merge su `main` e Cloudflare mette online il sito in circa 1-2 minuti.
 - **Due modi d'uso**: bot Telegram oppure skill di Claude Code.
 
@@ -87,7 +87,15 @@ Sotto la bozza trovi `[Pubblica sul sito]`, `[✏️ Rivedi]` (scrivi cosa cambi
 
 ## 🤖 Uso con la skill di Claude Code
 
-Apri Claude Code in questa cartella e scrivi per esempio *"scrivi un articolo sulla nostra partecipazione al festival"*. La skill `write-article` ti fa qualche domanda per mettere a fuoco l'articolo (tipo, fatti, tono, partner, copertina), salva il brief in `data/briefs/` e lancia la pipeline AI del progetto. Il testo lo scrive sempre l'AI configurata in `AI_PROVIDER`, non la skill.
+È il modo più comodo di usare il progetto. Apri Claude Code in questa cartella e scrivi per esempio *"scrivi un articolo sulla nostra partecipazione al festival"* oppure *"fai gli articoli per queste tre collaborazioni, le note sono in `.sandbox`"*. La skill `write-article`:
+
+1. legge le tue note e le immagini (in qualunque formato: JPEG, PNG, WEBP, AVIF…) e, se le dai il link di un messaggio del canale Telegram pubblico, ne prende testo, data e foto;
+2. ti fa solo le domande che mancano, scrive un brief per ogni articolo in `data/briefs/` e ti chiede **un solo ok** per tutti;
+3. crea le bozze sul repo del sito (la bozza è già l'anteprima: niente va online prima di pubblicare);
+4. **controlla ogni bozza** (refusi, fatti inventati, scheda partner) e la corregge: le correzioni piccole sul testo generato, quelle grandi facendo riscrivere l'articolo all'AI;
+5. pubblica solo quando glielo dici e poi verifica che le pagine siano online.
+
+Il testo lo scrive sempre l'AI configurata in `AI_PROVIDER`, non la skill.
 
 ## ⌨️ Da riga di comando
 
@@ -102,6 +110,16 @@ Apri Claude Code in questa cartella e scrivi per esempio *"scrivi un articolo su
 .venv/bin/python scripts/publish_article.py <id|slug> --discard  # scarta
 ```
 `--dry-run` non carica nulla su R2 e non scrive su GitHub.
+
+Guardare, correggere e rigenerare una bozza già creata (senza pubblicarla) e leggere un post del canale Telegram:
+```bash
+.venv/bin/python scripts/edit_draft.py show <id|slug>      # i file come sono sul branch della bozza
+.venv/bin/python scripts/edit_draft.py pull <id|slug>      # li scrive in drafts/<id>/ (articolo.md, scheda.md)
+.venv/bin/python scripts/edit_draft.py push <id|slug>      # controlla le tue correzioni e le rimanda sulla bozza
+.venv/bin/python scripts/edit_draft.py revise <id|slug> --feedback "più breve"   # l'AI riscrive il testo
+.venv/bin/python scripts/fetch_telegram.py https://t.me/canale/123   # testo, data (per --date) e foto del messaggio
+```
+Se in `articolo.md` cambi `date`, `push` rinomina il file dell'articolo.
 
 ## 🚢 Deploy su k3s
 

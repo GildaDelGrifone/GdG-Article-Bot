@@ -28,7 +28,7 @@ An admin supplies a free-text brief and one or more images. The bot:
 It does **not** handle game-night recaps ("serate"): those stay in `GdG-Event-Bot`.
 
 ## 2. Workflows
-Both entry points call the same pipeline (`core/pipeline.py`: `create_article`, `create_card`, `revise_article`, `publish`, `discard`; blocking functions, `PipelineError` carries an Italian message for the user, `SettingsError` marks missing `.env` values).
+Both entry points call the same pipeline (`core/pipeline.py`: `create_article`, `create_card`, `revise_article`, `show_draft`, `pull_draft`, `push_draft`, `publish`, `discard`; blocking functions, `PipelineError` carries an Italian message for the user, `SettingsError` marks missing `.env` values).
 
 ### 2.1. Telegram bot (`main.py`, `bot/`)
 - Admin-only: every handler is restricted to `ADMIN_CHAT_ID`.
@@ -40,12 +40,14 @@ Both entry points call the same pipeline (`core/pipeline.py`: `create_article`, 
   - **Scarta** deletes the branch (a missing branch means it was already published).
 
 ### 2.2. Claude skill (`.claude/skills/write-article/`)
-The skill interviews the user to refine the article vision (type, facts, audience, tone, partner details, cover/logo), writes `data/briefs/<name>.md`, then runs the CLI. **The skill never writes the article text itself**: the text always comes from the configured AI provider, so both paths behave the same.
+The skill is the main way to use the project. It reads the user's notes and Telegram channel posts (`scripts/fetch_telegram.py`), interviews the user for what is missing, writes one `data/briefs/<name>.md` per article (several articles can be requested at once) and asks for a single yes. Then it runs the CLI for real (the draft branch is the preview; a dry run only on request), **checks each draft against the brief** (typos, invented facts, card description) and fixes it: small fixes with `scripts/edit_draft.py pull` → Edit → `push`, bigger rewrites with `edit_draft.py revise`. It publishes only on an explicit yes and then checks that the pages answer 200. **The skill never writes an article from scratch**: the text always comes from the configured AI provider, so both paths behave the same.
 
 ### 2.3. CLI (`scripts/`)
 - `scripts/create_article.py --kind news|collab --brief FILE --images IMG [IMG ...] [--cover N] [--logo N] [--order N] [--date DD-MM-YYYY] [--provider gemini|claude] [--dry-run] [--output FILE]`. `--dry-run` writes the front matter and body (and the partner card, each preceded by a `<!-- FILE: <site path> -->` line) to a file or stdout without uploading or committing; it needs only the AI key. Exit codes: 0 ok, 1 pipeline error, 2 bad arguments or missing settings.
 - `scripts/create_card.py --name NAME --logo FILE --description TEXT [--article SLUG] [--order N] [--dry-run] [--output FILE]` creates a draft of the **partner card only** (no article, no AI: needs only R2 and GitHub settings; the description is at most 200 characters). `--article` is the slug of the collaboration news article already on the site: the card's `url` becomes `<ASTRO_BASE_URL>/news/<slug>/` and the command fails if no such article exists (without `--article` the card has no link). It is a draft of kind `card` on the branch `scheda/<card-slug>`, commit message `Bozza scheda <card-slug>`, published or discarded like any draft; its final link is the `/collaborazioni` page. A card cannot be revised: discard it and create a new one. Same exit codes as `create_article.py`.
 - `scripts/publish_article.py <id|slug> [--discard]` merges or discards a draft; `--list` shows the pending drafts.
+- `scripts/edit_draft.py show|pull|push|revise <id|slug>` works on an existing draft without publishing it. `show` prints the files as they are on the draft branch (`<!-- FILE: <site path> -->` before each). `pull [--dir DIR]` writes `articolo.md` (and `scheda.md` for a collaboration or a card) to `drafts/<id>/`. `push [--dir DIR]` validates the files with the same rules as the AI output (`validate.check_body`: sections, one `---`, closing 🦅, only `img:N` images, no bare URLs; title ≤ 80, excerpt ≤ 160, card description ≤ 200, valid `date`) and commits them to the draft branch; R2 image addresses are mapped back to `img:N`, the corrected body is saved in `last_body` (so a later Rivedi starts from it) and a changed `date` renames the article file (`github.delete_file` removes the old one). `revise --feedback TEXT [--provider P]` is the CLI version of Rivedi. Needs only GitHub/R2 settings, except `revise` (AI key). Published or discarded drafts give an error.
+- `scripts/fetch_telegram.py <https://t.me/channel/N> [--out DIR]` reads a public channel post through its embed page (`core/telegram_post.py`, no login): saves `post.md` and `img_N.jpg` in `data/telegram/<channel>-<N>/` and prints the date as `GG-MM-AAAA` (Europe/Rome, ready for `--date`), the photos, the links and the text.
 
 ## 3. Article Formats
 The website schema is `GdG-Website/src/content.config.ts`. **Keep this section in sync with it** and re-check it on the latest `main` of the website before changing the generators (the local checkout of the website may lag behind).
@@ -75,6 +77,7 @@ The site shows partner cards only on `/collaborazioni` (no per-card page, the bo
 
 ## 4. Image Pipeline
 Ported from `GdG-Event-Bot/core/astro/storage.py`:
+- Any format Pillow opens is accepted (JPEG/`.jfif`, PNG, WEBP, AVIF, GIF, BMP, TIFF): `create_article` and `create_card` first copy the images with `storage.normalize_image` as `NN.jpg`/`NN.png` (the format is detected from the content: JPEG/PNG are copied as they are, anything else becomes PNG if transparent, otherwise JPEG quality 90). The converted copies are what the AI, R2 and `data/tmp/<id>/` see; an unreadable file is a `PipelineError` naming its number. AVIF needs Pillow ≥ 11.3.
 - JPEG/PNG are EXIF-transposed and resized to at most **1600 px** wide (LANCZOS); JPEG saved as RGB quality 85, PNG kept as PNG; other types uploaded as raw bytes.
 - R2 key: `news/<slug>/img_<n>_<uuid8>.<ext>`; partner logo: `collaborazioni/<partner-slug>/logo_<uuid8>.<ext>`. Public URL: `{R2_PUBLIC_URL}/{key}`.
 - boto3 is imported lazily; missing R2 settings or upload errors return `None` and are reported to the admin (a failed upload must stop the pipeline: never publish an article with missing images).
@@ -118,11 +121,12 @@ GdG-Article-Bot/
 │   ├── brief.py         # parse_markers: copertina: / logo: / ordine: lines of a brief
 │   ├── prompts.py       # system + task prompts (news, collab, revise, fix), COLLAB_STYLE_EXAMPLE
 │   ├── validate.py      # normalize + check_article + generate_valid (retry loop, 3 attempts)
-│   ├── pipeline.py      # create_article / create_card / revise_article / publish / discard (+ Draft, PipelineError)
+│   ├── pipeline.py      # create_article / create_card / revise_article / show_draft / pull_draft / push_draft / publish / discard (+ Draft, PipelineError)
+│   ├── telegram_post.py # reads a public Telegram channel post (text, date, photos) for fetch_telegram.py
 │   ├── db.py            # SQLite state of the drafts
 │   ├── ai/              # base.py (contract, schema, errors), gemini.py, claude.py, provider.py (get_provider)
 │   └── site/            # client.py (GitHub + R2 clients), storage.py (R2), github.py, content.py (slugs, front matter, draft lifecycle)
-├── scripts/             # create_article.py, create_card.py, publish_article.py
+├── scripts/             # create_article.py, create_card.py, edit_draft.py, publish_article.py, fetch_telegram.py
 ├── tests/               # mirrors the source tree; helpers in tests/support/
 ├── data/                # runtime: articles.db, briefs/, tmp/ (originals of the open drafts), logs/ (git-ignored)
 ├── .claude/skills/      # write-article skill
