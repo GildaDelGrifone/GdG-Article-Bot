@@ -2,6 +2,7 @@ import io
 import logging
 import mimetypes
 import os
+import shutil
 import uuid
 
 import requests
@@ -37,6 +38,34 @@ def _prepare_image(filepath):
         else:
             img.save(buf, format=fmt)
     return buf.getvalue(), content_type
+
+
+def normalize_image(path, folder, number=1):
+    """Copia `path` in `folder` come `NN.jpg` o `NN.png` e restituisce il nuovo percorso.
+
+    Il formato si riconosce dal contenuto, non dall'estensione: un JPEG (anche `.jfif`) o un PNG vengono copiati così
+    come sono; WEBP, AVIF, GIF, BMP, TIFF... diventano PNG se hanno trasparenza, altrimenti JPEG (qualità 90).
+    Di una GIF animata resta il primo fotogramma. Un file che Pillow non apre dà ValueError.
+    """
+    try:
+        with Image.open(path) as img:
+            fmt = img.format
+            if fmt in ("JPEG", "PNG"):
+                target = os.path.join(folder, f"{number:02d}.{'jpg' if fmt == 'JPEG' else 'png'}")
+                shutil.copyfile(path, target)
+                return target
+            img = ImageOps.exif_transpose(img)
+            has_alpha = img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info
+            ext, save_format = ("png", "PNG") if has_alpha else ("jpg", "JPEG")
+            img = img.convert("RGBA" if has_alpha else "RGB")
+            target = os.path.join(folder, f"{number:02d}.{ext}")
+            if save_format == "JPEG":
+                img.save(target, format=save_format, quality=90)
+            else:
+                img.save(target, format=save_format)
+            return target
+    except OSError as e:
+        raise ValueError(f"formato non supportato ({os.path.basename(path)})") from e
 
 
 def vision_copy(filepath):

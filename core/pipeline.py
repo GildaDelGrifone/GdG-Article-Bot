@@ -2,6 +2,8 @@ import logging
 import os
 import re
 import shutil
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date as date_type
 from datetime import datetime
@@ -11,11 +13,14 @@ from core import config, db
 from core.ai.provider import get_provider
 from core.brief import parse_markers
 from core.site import content, storage
-from core.validate import DESCRIPTION_LIMIT, ArticleError, generate_valid
+from core.validate import (DESCRIPTION_LIMIT, EXCERPT_LIMIT, TITLE_LIMIT, ArticleError, check_body, generate_valid,
+                           valid_url)
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_ORDER = 100
+ARTICLE_FILE = "articolo.md"  # nomi dei file di una bozza scaricata con pull_draft
+CARD_FILE = "scheda.md"
 DRY_RUN_HOST = "https://media.example"
 
 
@@ -62,6 +67,26 @@ def _check_settings(mode):
     missing = config.missing_settings(mode)
     if missing:
         raise SettingsError("Impostazioni mancanti: " + ", ".join(missing))
+
+
+@contextmanager
+def _normalized_images(paths):
+    """Copia le immagini in una cartella temporanea come JPEG/PNG (vedi storage.normalize_image) e le dà al chiamante."""
+    paths = list(paths or [])
+    os.makedirs(config.TMP_DIR, exist_ok=True)
+    workdir = tempfile.mkdtemp(prefix="img_", dir=config.TMP_DIR)
+    try:
+        converted = []
+        for number, path in enumerate(paths, start=1):
+            if not os.path.isfile(path or ""):
+                raise PipelineError(f"Immagine {number} non trovata: {path}")
+            try:
+                converted.append(storage.normalize_image(path, workdir, number))
+            except ValueError as e:
+                raise PipelineError(f"Immagine {number}: {e}") from e
+        yield converted
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
 
 
 def _vision_images(paths):
@@ -163,8 +188,14 @@ def create_article(kind, brief, image_paths, cover=None, logo=None, order=None, 
     """Crea la bozza di un articolo `kind` ("news" o "collab") dal brief e dalle immagini; funzione bloccante.
 
     `brief` può contenere le righe `copertina: N`, `logo: N`, `ordine: N` (gli argomenti espliciti hanno la precedenza).
+    Le immagini possono essere in qualunque formato che Pillow apre: vengono convertite in JPEG/PNG prima di tutto il resto.
     Con `dry_run` non carica nulla su R2 e non scrive su GitHub: restituisce solo il testo.
     """
+    with _normalized_images(image_paths) as paths:
+        return _create_article(kind, brief, paths, cover, logo, order, date, dry_run, provider, chat_id, message_id)
+
+
+def _create_article(kind, brief, image_paths, cover, logo, order, date, dry_run, provider, chat_id, message_id):
     if kind not in content.KINDS:
         raise PipelineError(f"Tipo di articolo sconosciuto: {kind}")
     _check_settings("dry_run" if dry_run else "cli")
@@ -248,6 +279,11 @@ def create_card(nome, logo_path, descrizione, article=None, order=None, dry_run=
     """
     _check_settings("card_dry_run" if dry_run else "card")
     _check_card_fields(nome, logo_path, descrizione)
+    with _normalized_images([logo_path]) as (logo_file,):
+        return _create_card(nome, logo_file, descrizione, article, order, dry_run)
+
+
+def _create_card(nome, logo_path, descrizione, article, order, dry_run):
     nome, descrizione = nome.strip(), descrizione.strip()
     article = (article or "").strip() or None
     if article:
@@ -354,3 +390,152 @@ def discard(article_id):
     db.update_article(article_id, status=status)
     _forget_originals(article_id)
     return status
+
+
+# --- correzione delle bozze a mano (skill / riga di comando) ---------------------------------------------------------
+
+def _draft_files(article):
+    """[(nome del file locale, percorso sul sito)] dei file di una bozza."""
+    files = []
+    if article["kind"] != content.CARD_KIND:
+        files.append((ARTICLE_FILE, content.news_path(article["date_iso"], article["slug"])))
+    if article["kind"] in ("collab", content.CARD_KIND):
+        files.append((CARD_FILE, content.card_path(article["card_slug"])))
+    return files
+
+
+def _read_draft(article):
+    """[(nome locale, percorso sul sito, testo)] letti dal branch della bozza."""
+    files = []
+    for local, path in _draft_files(article):
+        try:
+            text = content.read_draft_file(path, article["branch"])
+        except Exception as e:
+            raise PipelineError(f"Impossibile leggere la bozza su GitHub: {e}") from e
+        if text is None:
+            raise PipelineError(f"Il file {path} non esiste sul branch {article['branch']}")
+        files.append((local, path, text))
+    return files
+
+
+def show_draft(article_id):
+    """I file della bozza come sono sul suo branch: [(percorso sul sito, testo)]."""
+    _check_settings("card")
+    return [(path, text) for _, path, text in _read_draft(_load_draft(article_id))]
+
+
+def pull_draft(article_id, folder):
+    """Scrive in `folder` i file della bozza (`articolo.md`, `scheda.md`) perché si possano correggere; restituisce i percorsi."""
+    _check_settings("card")
+    written = []
+    os.makedirs(folder, exist_ok=True)
+    for local, _, text in _read_draft(_load_draft(article_id)):
+        target = os.path.join(folder, local)
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(text)
+        written.append(target)
+    return written
+
+
+def _parse_file(name, text):
+    try:
+        return content.parse_front_matter(text)
+    except ValueError as e:
+        raise PipelineError(f"{name}: {e}") from e
+
+
+def _check_edited_article(article, fields, body):
+    """(corpo con i segnaposto img:N, indice della copertina o None) di un articolo corretto; PipelineError se non è valido."""
+    problems = []
+    title, excerpt, date = (fields.get(key, "").strip() for key in ("title", "excerpt", "date"))
+    if not title:
+        problems.append("manca il titolo (title)")
+    elif len(title) > TITLE_LIMIT:
+        problems.append(f"il titolo supera {TITLE_LIMIT} caratteri")
+    if not excerpt:
+        problems.append("manca l'estratto (excerpt)")
+    elif len(excerpt) > EXCERPT_LIMIT:
+        problems.append(f"l'estratto supera {EXCERPT_LIMIT} caratteri")
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        problems.append(f"la data (date) '{date}' non è valida: usa AAAA-MM-GG")
+    cover = fields.get("cover", "").strip()
+    if cover and not valid_url(cover):
+        problems.append("la copertina (cover) non è un indirizzo web")
+
+    urls = [storage.media_url(key) for key in article["image_keys"]]
+    for number, url in enumerate(urls, start=1):
+        body = body.replace(f"]({url})", f"](img:{number})")
+    problems += check_body(body, article["kind"], len(urls))
+    if problems:
+        raise PipelineError("L'articolo non è valido: " + "; ".join(problems))
+    return body, (urls.index(cover) + 1 if cover in urls else None)
+
+
+def _check_edited_card(fields):
+    problems = []
+    if not fields.get("nome", "").strip():
+        problems.append("manca il nome (nome)")
+    if not valid_url(fields.get("logo", "")):
+        problems.append("il logo (logo) non è un indirizzo web")
+    if fields.get("url", "").strip() and not valid_url(fields["url"]):
+        problems.append("url non è un indirizzo web")
+    description = fields.get("descrizione", "").strip()
+    if not description:
+        problems.append("manca la descrizione (descrizione)")
+    elif len(description) > DESCRIPTION_LIMIT:
+        problems.append(f"la descrizione supera {DESCRIPTION_LIMIT} caratteri ({len(description)})")
+    try:
+        order = int(fields.get("ordine", ""))
+    except ValueError:
+        order = None
+        problems.append("ordine deve essere un numero intero")
+    if problems:
+        raise PipelineError("La scheda non è valida: " + "; ".join(problems))
+    return order
+
+
+def push_draft(article_id, folder):
+    """Controlla i file corretti in `folder` e li scrive sul branch della bozza; restituisce il link della bozza.
+
+    Valgono le regole dell'AI (sezioni, riga `---`, chiusura con 🦅, immagini, lunghezze). Il testo salvato nel database
+    (`last_body`) è quello corretto, così un «Rivedi» successivo parte da qui. Se cambia `date` l'articolo cambia nome
+    (la data è nel nome del file) e il vecchio file viene eliminato.
+    """
+    _check_settings("card")
+    article = _load_draft(article_id)
+    texts = {}
+    for local, _ in _draft_files(article):
+        path = os.path.join(folder, local)
+        if not os.path.isfile(path):
+            raise PipelineError(f"File non trovato: {path} (scarica prima la bozza con `edit_draft.py pull`)")
+        with open(path, encoding="utf-8") as f:
+            texts[local] = f.read().strip("\n") + "\n"
+
+    kind, updates = article["kind"], {}
+    news_markdown = card_markdown = None
+    date_iso = article["date_iso"]
+    if ARTICLE_FILE in texts:
+        news_markdown = texts[ARTICLE_FILE]
+        fields, body = _parse_file(ARTICLE_FILE, news_markdown)
+        placeholder_body, cover_index = _check_edited_article(article, fields, body)
+        date_iso = fields["date"].strip()
+        updates.update(title=fields["title"].strip(), date_iso=date_iso, last_body=placeholder_body,
+                       cover_index=cover_index)
+    if CARD_FILE in texts:
+        card_markdown = texts[CARD_FILE]
+        fields, _ = _parse_file(CARD_FILE, card_markdown)
+        updates["card_order"] = _check_edited_card(fields)
+        if kind == content.CARD_KIND:
+            updates["title"] = fields["nome"].strip()
+
+    if kind == content.CARD_KIND:
+        draft_url = content.update_card_draft(article["card_slug"], card_markdown, article["branch"])
+    else:
+        draft_url = content.update_draft(kind, article["slug"], date_iso, article["branch"], news_markdown,
+                                         card_markdown, article["card_slug"], old_date_iso=article["date_iso"])
+    if not draft_url:
+        raise PipelineError("Aggiornamento della bozza su GitHub fallito")
+    db.update_article(article_id, draft_url=draft_url, **updates)
+    return draft_url

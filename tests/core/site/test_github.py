@@ -118,5 +118,22 @@ class TestNotConfigured(unittest.TestCase):
         req.assert_not_called()
 
 
+class TestDeleteFile(unittest.TestCase):
+    def test_deletes_with_the_blob_sha(self):
+        with site_config(), patched_requests(response(200, {"sha": "abc"}), response(200)) as req:
+            self.assertTrue(github.delete_file("src/a.md", "msg", "news/x"))
+        self.assertEqual(calls(req), [("GET", "contents/src/a.md"), ("DELETE", "contents/src/a.md")])
+        self.assertEqual(req.call_args_list[1].kwargs["json"], {"message": "msg", "sha": "abc", "branch": "news/x"})
+
+    def test_a_missing_file_counts_as_deleted(self):
+        with site_config(), patched_requests(response(404)) as req:
+            self.assertTrue(github.delete_file("src/a.md", "msg", "news/x"))
+        self.assertEqual(req.call_count, 1)
+
+    def test_failure(self):
+        with site_config(), patched_requests(response(200, {"sha": "abc"}), response(500, text="x")):
+            self.assertFalse(github.delete_file("src/a.md", "msg", "news/x"))
+
+
 if __name__ == "__main__":
     unittest.main()

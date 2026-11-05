@@ -102,6 +102,31 @@ def build_partner_card(nome, logo_url, url, descrizione, ordine=100):
     return "\n".join(lines) + "\n"
 
 
+def parse_front_matter(text):
+    """(campi, corpo) di un file Markdown con front matter `chiave: valore` (stringhe tra virgolette JSON, come le scrive il bot).
+
+    ValueError se manca il front matter o se una riga non è nella forma `chiave: valore`.
+    """
+    match = re.match(r"\A---[ \t]*\n(.*?)\n---[ \t]*(?:\n|\Z)(.*)\Z", text.replace("\r\n", "\n"), re.DOTALL)
+    if not match:
+        raise ValueError("manca il front matter (le righe tra due `---` all'inizio del file)")
+    fields = {}
+    for number, line in enumerate(match.group(1).split("\n"), start=1):
+        if not line.strip():
+            continue
+        key, separator, value = line.partition(":")
+        if not separator or not key.strip() or " " in key.strip():
+            raise ValueError(f"riga {number} del front matter non valida: {line!r}")
+        value = value.strip()
+        if value.startswith('"'):
+            try:
+                value = json.loads(value)
+            except ValueError as e:
+                raise ValueError(f"riga {number} del front matter: stringa tra virgolette non valida") from e
+        fields[key.strip()] = value
+    return fields, match.group(2).strip("\n")
+
+
 def news_path(date_iso, slug):
     return f"{config.NEWS_CONTENT_DIR.strip('/')}/{date_iso}-{slug}.md"
 
@@ -189,17 +214,46 @@ def create_card_draft(card_slug, card_markdown):
         return None, None
 
 
-def update_draft(kind, slug, date_iso, branch, news_markdown, card_markdown=None, card_slug=None):
-    """Riscrive i file di una bozza sullo stesso branch (Rivedi). Restituisce il link della bozza o None."""
+def update_draft(kind, slug, date_iso, branch, news_markdown, card_markdown=None, card_slug=None, old_date_iso=None):
+    """Riscrive i file di una bozza sullo stesso branch (Rivedi). Restituisce il link della bozza o None.
+
+    Se `old_date_iso` è diversa da `date_iso` l'articolo cambia nome (la data è nel nome del file): il vecchio file
+    viene eliminato dopo aver scritto il nuovo.
+    """
     if not github_credentials():
         return None
     try:
         if not github.branch_exists(branch):
             return None
-        return _commit_files(kind, slug, date_iso, branch, news_markdown, card_markdown, card_slug)
+        draft_url = _commit_files(kind, slug, date_iso, branch, news_markdown, card_markdown, card_slug)
+        if draft_url and old_date_iso and old_date_iso != date_iso:
+            if not github.delete_file(news_path(old_date_iso, slug), f"Bozza {slug}: nuova data", branch):
+                return None
+        return draft_url
     except Exception as e:
         logger.error("Aggiornamento della bozza '%s' fallito: %s", branch, e)
         return None
+
+
+def update_card_draft(card_slug, card_markdown, branch):
+    """Riscrive la scheda di una bozza `scheda/<slug>`. Restituisce il link della bozza o None."""
+    if not github_credentials():
+        return None
+    try:
+        if not github.branch_exists(branch):
+            return None
+        path = card_path(card_slug)
+        if not github.put_file(path, card_markdown, f"Bozza scheda {card_slug}", branch):
+            return None
+        return _file_url(branch, path)
+    except Exception as e:
+        logger.error("Aggiornamento della bozza '%s' fallito: %s", branch, e)
+        return None
+
+
+def read_draft_file(path, branch):
+    """Il testo di un file della bozza, o None se non esiste."""
+    return github.get_file_text(path, branch)
 
 
 def publish_draft(branch):

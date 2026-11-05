@@ -163,5 +163,59 @@ class TestRealR2Client(unittest.TestCase):
             self.assertIsNone(r2_client())
 
 
+class TestNormalizeImage(StorageTestCase):
+    def save(self, name, fmt, mode="RGB", size=(120, 80), color=(10, 120, 200)):
+        path = os.path.join(self.dir, name)
+        Image.new(mode, size, color).save(path, format=fmt)
+        return path
+
+    def test_jpeg_is_copied_whatever_its_extension(self):
+        path = self.save("Foto.JFIF", "JPEG")
+        target = storage.normalize_image(path, self.dir, 3)
+        self.assertEqual(os.path.basename(target), "03.jpg")
+        with open(path, "rb") as original, open(target, "rb") as copy:
+            self.assertEqual(original.read(), copy.read())
+
+    def test_png_stays_png(self):
+        target = storage.normalize_image(self.save("logo.png", "PNG"), self.dir, 1)
+        self.assertEqual(os.path.basename(target), "01.png")
+
+    def test_content_wins_over_the_extension(self):
+        target = storage.normalize_image(self.save("sembra.png", "JPEG"), self.dir, 2)
+        self.assertEqual(os.path.basename(target), "02.jpg")
+
+    def test_opaque_webp_becomes_jpeg(self):
+        target = storage.normalize_image(self.save("a.webp", "WEBP"), self.dir)
+        self.assertTrue(target.endswith(".jpg"))
+        with Image.open(target) as img:
+            self.assertEqual((img.format, img.size), ("JPEG", (120, 80)))
+
+    def test_transparent_webp_becomes_png(self):
+        target = storage.normalize_image(self.save("a.webp", "WEBP", "RGBA", color=(10, 120, 200, 0)), self.dir)
+        with Image.open(target) as img:
+            self.assertEqual((img.format, img.mode), ("PNG", "RGBA"))
+
+    def test_gif_keeps_the_first_frame(self):
+        frames = [Image.new("P", (40, 30), color=value) for value in (1, 2)]
+        path = os.path.join(self.dir, "anim.gif")
+        frames[0].save(path, save_all=True, append_images=frames[1:])
+        target = storage.normalize_image(path, self.dir, 4)
+        self.assertEqual(os.path.basename(target), "04.jpg")
+
+    def test_avif_is_readable_when_pillow_supports_it(self):
+        from PIL import features
+        if not features.check("avif"):
+            self.skipTest("Pillow senza AVIF")
+        target = storage.normalize_image(self.save("a.avif", "AVIF"), self.dir)
+        self.assertTrue(target.endswith(".jpg"))
+
+    def test_unreadable_file_is_a_value_error(self):
+        path = os.path.join(self.dir, "rotta.jpg")
+        with open(path, "wb") as f:
+            f.write(b"non sono un'immagine")
+        with self.assertRaisesRegex(ValueError, "formato non supportato"):
+            storage.normalize_image(path, self.dir)
+
+
 if __name__ == "__main__":
     unittest.main()

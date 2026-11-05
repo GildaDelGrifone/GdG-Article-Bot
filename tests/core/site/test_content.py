@@ -236,5 +236,68 @@ class TestExistingNames(unittest.TestCase):
                          [("src/content/news", "main"), ("src/content/collaborazioni", "main")])
 
 
+class TestParseFrontMatter(unittest.TestCase):
+    def test_round_trip_of_the_news_front_matter(self):
+        text = content.build_news_markdown(
+            content.build_news_front_matter('Titolo: "bello"', "2026-01-02", "https://a/b.jpg", "Estratto…"), "Corpo\n\n## A")
+        fields, body = content.parse_front_matter(text)
+        self.assertEqual(fields, {"title": 'Titolo: "bello"', "date": "2026-01-02", "cover": "https://a/b.jpg",
+                                  "excerpt": "Estratto…"})
+        self.assertEqual(body, "Corpo\n\n## A")
+
+    def test_round_trip_of_the_partner_card(self):
+        fields, body = content.parse_front_matter(content.build_partner_card("Aces", "https://l/x.png", None, "Descr", 7))
+        self.assertEqual(fields, {"nome": "Aces", "logo": "https://l/x.png", "descrizione": "Descr", "ordine": "7"})
+        self.assertEqual(body, "")
+
+    def test_windows_line_endings(self):
+        fields, body = content.parse_front_matter('---\r\ntitle: "A"\r\n---\r\n\r\nCorpo\r\n')
+        self.assertEqual((fields["title"], body), ("A", "Corpo"))
+
+    def test_missing_front_matter(self):
+        with self.assertRaisesRegex(ValueError, "manca il front matter"):
+            content.parse_front_matter("solo testo")
+
+    def test_invalid_line(self):
+        with self.assertRaisesRegex(ValueError, "riga 1"):
+            content.parse_front_matter("---\nsenza due punti\n---\nx")
+
+    def test_invalid_quoted_string(self):
+        with self.assertRaisesRegex(ValueError, "riga 1"):
+            content.parse_front_matter('---\ntitle: "aperta\n---\nx')
+
+
+class TestUpdateWithDateChange(unittest.TestCase):
+    def test_new_date_writes_the_new_file_then_deletes_the_old_one(self):
+        responses = (response(200, {}), response(404), response(201), response(200, {"sha": "old"}), response(200))
+        with site_config(), patched_requests(*responses) as req:
+            url = content.update_draft("news", "festa", "2026-11-06", "news/festa", "md", old_date_iso="2026-11-05")
+        self.assertTrue(url.endswith("2026-11-06-festa.md"))
+        self.assertEqual(calls(req)[-1], ("DELETE", "contents/src/content/news/2026-11-05-festa.md"))
+
+    def test_same_date_deletes_nothing(self):
+        with site_config(), patched_requests(response(200, {}), response(404), response(201)) as req:
+            content.update_draft("news", "festa", "2026-11-05", "news/festa", "md", old_date_iso="2026-11-05")
+        self.assertNotIn("DELETE", [c[0] for c in calls(req)])
+
+    def test_failed_delete_fails_the_update(self):
+        responses = (response(200, {}), response(404), response(201), response(200, {"sha": "old"}), response(500, text="x"))
+        with site_config(), patched_requests(*responses):
+            self.assertIsNone(content.update_draft("news", "festa", "2026-11-06", "news/festa", "md",
+                                                   old_date_iso="2026-11-05"))
+
+
+class TestUpdateCardDraft(unittest.TestCase):
+    def test_rewrites_only_the_card(self):
+        with site_config(), patched_requests(response(200, {}), response(200, {"sha": "old"}), response(200)) as req:
+            url = content.update_card_draft("aces", "card md", "scheda/aces")
+        self.assertTrue(url.endswith("src/content/collaborazioni/aces.md"))
+        self.assertEqual(calls(req)[-1], ("PUT", "contents/src/content/collaborazioni/aces.md"))
+
+    def test_gone_branch(self):
+        with site_config(), patched_requests(response(404)):
+            self.assertIsNone(content.update_card_draft("aces", "x", "scheda/aces"))
+
+
 if __name__ == "__main__":
     unittest.main()

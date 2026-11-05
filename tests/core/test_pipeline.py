@@ -8,7 +8,7 @@ from core.ai.base import AIQuotaError
 from tests.core.test_validate import collab, news
 from tests.support.config import patched_config, site_config
 from tests.support.db import TempDBMixin
-from tests.support.images import image_file
+from tests.support.images import image_file, make_image
 
 DRAFT_URL = "https://github.com/o/r/blob/news/x/src/content/news/2026-11-05-x.md"
 
@@ -131,7 +131,9 @@ class TestCreateCollab(PipelineTestCase):
         uploads = [(c.args[1], c.args[2]) for c in self.upload.call_args_list]
         self.assertEqual(uploads[:3], [("news/collaborazione-con-aces-games", f"img_{n}") for n in (1, 2, 3)])
         self.assertEqual(uploads[3], ("collaborazioni/aces-games", "logo"))
-        self.assertEqual(self.upload.call_args_list[3].args[0], self.paths[2])  # il logo è l'immagine 3
+        logo_path = self.upload.call_args_list[3].args[0]  # il logo è l'immagine 3, copiata come 03.jpg
+        self.assertEqual(os.path.basename(logo_path), "03.jpg")
+        self.assertNotEqual(logo_path, self.paths[2])
 
         kind, slug, _, _, card, card_slug = self.create_draft.call_args.args
         self.assertEqual((kind, card_slug), ("collab", "aces-games"))
@@ -223,7 +225,7 @@ class TestCreateFailures(PipelineTestCase):
         broken = os.path.join(self.temp_dir, "rotta.jpg")
         open(broken, "wb").write(b"non sono un'immagine")
         self.paths[0] = broken
-        with self.assertRaisesRegex(pipeline.PipelineError, "non leggibile"):
+        with self.assertRaisesRegex(pipeline.PipelineError, "Immagine 1: formato non supportato"):
             self.create(provider_returning(news()))
 
 
@@ -378,6 +380,207 @@ class TestPublishAndDiscard(PipelineTestCase):
             pipeline.publish(404)
 
 
+class TestNormalizedImages(PipelineTestCase):
+    def test_other_formats_are_converted_before_the_upload(self):
+        from PIL import Image
+        webp = os.path.join(self.temp_dir, "banner.webp")
+        Image.new("RGB", (200, 80), (200, 100, 10)).save(webp, format="WEBP")
+        jfif = os.path.join(self.temp_dir, "logo.jfif")
+        Image.new("RGB", (90, 90)).save(jfif, format="JPEG")
+        self.paths = [webp, jfif, self.paths[2]]
+
+        self.create(provider_returning(news()))
+
+        uploaded = [os.path.basename(c.args[0]) for c in self.upload.call_args_list]
+        self.assertEqual(uploaded, ["01.jpg", "02.jpg", "03.jpg"])
+        keys = db.get_article(1)["image_keys"]
+        self.assertTrue(all(key.endswith(".jpg") for key in keys))
+
+    def test_temporary_copies_are_removed(self):
+        self.create(provider_returning(news()))
+        leftovers = [name for name in os.listdir(os.path.join(self.temp_dir, "tmp")) if name.startswith("img_")]
+        self.assertEqual(leftovers, [])
+
+    def test_missing_image_is_reported_with_its_number(self):
+        self.paths[1] = os.path.join(self.temp_dir, "non-c-e.jpg")
+        with self.assertRaisesRegex(pipeline.PipelineError, "Immagine 2 non trovata"):
+            self.create(provider_returning(news()))
+
+
+class TestEditDrafts(PipelineTestCase):
+    def setUp(self):
+        super().setUp()
+        self.update_card_draft = patch("core.pipeline.content.update_card_draft", return_value=DRAFT_URL)
+        self.update_card_draft_mock = self.update_card_draft.start()
+        self.addCleanup(self.update_card_draft.stop)
+        self.folder = os.path.join(self.temp_dir, "bozza")
+        os.makedirs(self.folder)
+
+    def write(self, name, text):
+        with open(os.path.join(self.folder, name), "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def make_news(self):
+        draft = self.create(provider_returning(news()))
+        self.write("articolo.md", draft.markdown)
+        return draft
+
+    def make_collab(self):
+        draft = self.create(provider_returning(collab()), kind="collab")
+        self.write("articolo.md", draft.markdown)
+        self.write("scheda.md", draft.card_markdown)
+        return draft
+
+    def edit(self, name, old, new):
+        path = os.path.join(self.folder, name)
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn(old, text)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text.replace(old, new, 1))
+
+    # --- show / pull
+    def test_show_returns_the_files_of_the_branch(self):
+        draft = self.make_collab()
+        remote = {"src/content/news/2026-11-05-collaborazione-con-aces-games.md": "NEWS",
+                  "src/content/collaborazioni/aces-games.md": "CARD"}
+        with patch("core.pipeline.content.read_draft_file", side_effect=lambda path, branch: remote[path]) as read:
+            files = pipeline.show_draft(draft.id)
+        self.assertEqual(files, list(remote.items()))
+        self.assertEqual({c.args[1] for c in read.call_args_list}, {draft.branch})
+
+    def test_pull_writes_the_files(self):
+        draft = self.make_collab()
+        with patch("core.pipeline.content.read_draft_file", side_effect=lambda path, branch: f"testo di {path}"):
+            written = pipeline.pull_draft(draft.id, os.path.join(self.temp_dir, "out"))
+        self.assertEqual([os.path.basename(p) for p in written], ["articolo.md", "scheda.md"])
+        with open(written[1], encoding="utf-8") as f:
+            self.assertEqual(f.read(), "testo di src/content/collaborazioni/aces-games.md")
+
+    def test_news_draft_has_no_card_file(self):
+        draft = self.make_news()
+        with patch("core.pipeline.content.read_draft_file", return_value="x"):
+            self.assertEqual(len(pipeline.show_draft(draft.id)), 1)
+
+    def test_missing_file_on_the_branch(self):
+        draft = self.make_news()
+        with patch("core.pipeline.content.read_draft_file", return_value=None):
+            with self.assertRaisesRegex(pipeline.PipelineError, "non esiste sul branch"):
+                pipeline.show_draft(draft.id)
+
+    def test_published_draft_cannot_be_shown(self):
+        draft = self.make_news()
+        pipeline.publish(draft.id)
+        with self.assertRaisesRegex(pipeline.PipelineError, "già pubblicata"):
+            pipeline.show_draft(draft.id)
+
+    # --- push
+    def test_push_commits_the_corrected_files_and_updates_the_database(self):
+        draft = self.make_news()
+        self.edit("articolo.md", "Una giornata bellissima.", "Una giornata splendida.")
+        self.edit("articolo.md", 'title: "Torneo di primavera"', 'title: "Torneo di primavera 2026"')
+
+        url = pipeline.push_draft(draft.id, self.folder)
+
+        self.assertEqual(url, DRAFT_URL)
+        args, kwargs = self.update_draft.call_args
+        self.assertEqual(args[:4], ("news", "torneo-di-primavera", "2026-11-05", "news/x"))
+        self.assertIn("Una giornata splendida.", args[4])
+        self.assertEqual(kwargs["old_date_iso"], "2026-11-05")
+        row = db.get_article(draft.id)
+        self.assertEqual(row["title"], "Torneo di primavera 2026")
+        self.assertIn("Una giornata splendida.", row["last_body"])
+        self.assertIn("](img:2)", row["last_body"])  # i segnaposto, non gli indirizzi di R2
+        self.assertNotIn("pub.r2.dev", row["last_body"])
+        self.assertEqual(row["cover_index"], 1)
+
+    def test_a_new_date_renames_the_article(self):
+        draft = self.make_news()
+        self.edit("articolo.md", "date: 2026-11-05", "date: 2026-09-21")
+        pipeline.push_draft(draft.id, self.folder)
+        args, kwargs = self.update_draft.call_args
+        self.assertEqual((args[2], kwargs["old_date_iso"]), ("2026-09-21", "2026-11-05"))
+        self.assertEqual(db.get_article(draft.id)["date_iso"], "2026-09-21")
+
+    def test_invalid_article_is_rejected_and_nothing_is_written(self):
+        draft = self.make_news()
+        self.edit("articolo.md", "Venite a trovarci in sede! 🦅", "Venite a trovarci in sede!")
+        with self.assertRaisesRegex(pipeline.PipelineError, "L'articolo non è valido.*🦅"):
+            pipeline.push_draft(draft.id, self.folder)
+        self.update_draft.assert_not_called()
+        self.assertEqual(db.get_article(draft.id)["title"], "Torneo di primavera")
+
+    def test_invalid_date_and_title_are_rejected(self):
+        draft = self.make_news()
+        self.edit("articolo.md", "date: 2026-11-05", "date: 5 novembre")
+        with self.assertRaisesRegex(pipeline.PipelineError, "data.*non è valida"):
+            pipeline.push_draft(draft.id, self.folder)
+        self.edit("articolo.md", "date: 5 novembre", "date: 2026-11-05")
+        self.edit("articolo.md", 'title: "Torneo di primavera"', 'title: "' + "T" * 81 + '"')
+        with self.assertRaisesRegex(pipeline.PipelineError, "titolo supera"):
+            pipeline.push_draft(draft.id, self.folder)
+
+    def test_a_real_image_address_is_rejected(self):
+        draft = self.make_news()
+        self.edit("articolo.md", "![Giocatori al tavolo](", "![Giocatori al tavolo](https://altro.example/x.jpg")
+        with self.assertRaisesRegex(pipeline.PipelineError, "indirizzo reale"):
+            pipeline.push_draft(draft.id, self.folder)
+
+    def test_missing_local_file_points_to_pull(self):
+        draft = self.make_news()
+        os.remove(os.path.join(self.folder, "articolo.md"))
+        with self.assertRaisesRegex(pipeline.PipelineError, "edit_draft.py pull"):
+            pipeline.push_draft(draft.id, self.folder)
+
+    def test_front_matter_is_required(self):
+        draft = self.make_news()
+        self.write("articolo.md", "solo testo")
+        with self.assertRaisesRegex(pipeline.PipelineError, "articolo.md: manca il front matter"):
+            pipeline.push_draft(draft.id, self.folder)
+
+    def test_collaboration_pushes_article_and_card(self):
+        draft = self.make_collab()
+        self.edit("scheda.md", "ordine: 100", "ordine: 7")
+        pipeline.push_draft(draft.id, self.folder)
+        args, _ = self.update_draft.call_args
+        self.assertIn("ordine: 7", args[5])
+        self.assertEqual(args[6], "aces-games")
+        self.assertEqual(db.get_article(draft.id)["card_order"], 7)
+
+    def test_card_description_over_the_limit_is_rejected(self):
+        draft = self.make_collab()
+        self.edit("scheda.md", 'descrizione: "Casa editrice italiana."', 'descrizione: "' + "d" * 201 + '"')
+        with self.assertRaisesRegex(pipeline.PipelineError, "descrizione supera 200"):
+            pipeline.push_draft(draft.id, self.folder)
+        self.update_draft.assert_not_called()
+
+    def test_card_only_draft(self):
+        card = db.insert_article("card", slug="aces-games", card_slug="aces-games", branch="scheda/aces-games",
+                                 title="Aces Games", date_iso="2026-11-05", draft_url=DRAFT_URL, card_order=100)
+        self.write("scheda.md", '---\nnome: "Aces Games"\nlogo: "https://pub.r2.dev/l.png"\n'
+                                'descrizione: "Una frase."\nordine: 3\n---\n')
+        pipeline.push_draft(card, self.folder)
+        self.update_card_draft_mock.assert_called_once()
+        self.assertEqual(self.update_card_draft_mock.call_args.args[::2], ("aces-games", "scheda/aces-games"))
+        self.update_draft.assert_not_called()
+        self.assertEqual(db.get_article(card)["card_order"], 3)
+
+    def test_github_failure(self):
+        draft = self.make_news()
+        self.update_draft.return_value = None
+        with self.assertRaisesRegex(pipeline.PipelineError, "Aggiornamento della bozza su GitHub fallito"):
+            pipeline.push_draft(draft.id, self.folder)
+        self.assertEqual(db.get_article(draft.id)["title"], "Torneo di primavera")
+
+    def test_a_revision_after_a_push_starts_from_the_corrected_text(self):
+        draft = self.make_news()
+        self.edit("articolo.md", "Una giornata bellissima.", "Una giornata splendida.")
+        pipeline.push_draft(draft.id, self.folder)
+        provider = provider_returning(news())
+        pipeline.revise_article(draft.id, "più breve", provider=provider)
+        self.assertIn("Una giornata splendida.", provider.generate.call_args.args[1])
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -385,7 +588,8 @@ if __name__ == "__main__":
 class TestCreateCard(PipelineTestCase):
     def setUp(self):
         super().setUp()
-        self.logo = image_file(self.temp_dir, "logo.png", 300, 300)
+        self.logo = os.path.join(self.temp_dir, "logo.png")
+        make_image(300, 300).save(self.logo, format="PNG")
         self.create_card_draft = patch(
             "core.pipeline.content.create_card_draft", return_value=(DRAFT_URL, "scheda/aces-games"))
         self.create_card_draft = self.create_card_draft.start()
@@ -402,7 +606,9 @@ class TestCreateCard(PipelineTestCase):
         self.assertEqual((draft.kind, draft.slug, draft.card_slug, draft.title), ("card", "aces-games", "aces-games", "Aces Games"))
         self.assertEqual((draft.branch, draft.draft_url), ("scheda/aces-games", DRAFT_URL))
         self.assertEqual(draft.public_url, "https://example.org/collaborazioni/")
-        self.upload.assert_called_once_with(self.logo, "collaborazioni/aces-games", "logo")
+        self.upload.assert_called_once()
+        logo_path, prefix, stem = self.upload.call_args.args
+        self.assertEqual((os.path.basename(logo_path), prefix, stem), ("01.png", "collaborazioni/aces-games", "logo"))
         slug, markdown = self.create_card_draft.call_args.args
         self.assertEqual(slug, "aces-games")
         self.assertIn('nome: "Aces Games"\nlogo: "https://pub.r2.dev/collaborazioni/aces-games/logo_abcd1234.png"\n'

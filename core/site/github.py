@@ -83,6 +83,18 @@ def put_file(path, content, message, branch):
     return True
 
 
+def delete_file(path, message, branch):
+    """Elimina `path` da `branch`; un file che non esiste già più vale come eliminato."""
+    sha = get_file(path, branch)
+    if not sha:
+        return True
+    response = gh_request("DELETE", f"contents/{quote(path)}", json={"message": message, "sha": sha, "branch": branch})
+    if response.status_code != 200:
+        logger.error("GitHub: eliminazione di '%s' su '%s' fallita: %s - %s", path, branch, response.status_code, response.text)
+        return False
+    return True
+
+
 def merge_branch(head, base, message):
     """Fa il merge di `head` in `base`; 201 (unito) e 204 (niente da unire) sono entrambi successo."""
     response = gh_request("POST", "merges", json={"base": base, "head": head, "commit_message": message})

@@ -83,7 +83,7 @@ def valid_url(value):
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 
-def _check_body(body, kind, n_images):
+def check_body(body, kind, n_images):
     problems = []
     lines = [line.rstrip() for line in body.split("\n")]
     non_empty = [line for line in lines if line.strip()]
@@ -150,7 +150,7 @@ def check_article(result, kind, n_images):
     if not isinstance(body, str) or not body.strip():
         problems.append("manca il testo")
     else:
-        problems += _check_body(body, kind, n_images)
+        problems += check_body(body, kind, n_images)
 
     if kind == "collab":
         partner = result.get("partner")
