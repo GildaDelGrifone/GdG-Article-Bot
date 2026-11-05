@@ -78,7 +78,7 @@ R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "").rstrip("/")
 # --- Fatti sull'associazione usati nei prompt ---
 ASSOCIATION_ADDRESS = os.getenv("ASSOCIATION_ADDRESS", "Gilda del Grifone, Via Ada Negri 8/A, Torino")
 OPENING_HOURS = os.getenv("OPENING_HOURS", "lunedì, mercoledì e venerdì dalle 20:45 alle 24:00")
-TELEGRAM_GROUP_URL = os.getenv("TELEGRAM_GROUP_URL", "")
+TELEGRAM_GROUP_URL = os.getenv("TELEGRAM_GROUP_URL", "https://t.me/+U5NEyDvN_fMxZTQ0")
 ARTICLE_CONTACTS = _env_list("ARTICLE_CONTACTS", "@Destard,@ManueleAbi")
 BOOKING_BOT_NAME = os.getenv("BOOKING_BOT_NAME", "").strip()
 
