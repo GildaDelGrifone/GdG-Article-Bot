@@ -114,7 +114,7 @@ Come gli altri bot (vedi `../K8S_BOT_SETUP_GUIDE.md`): il pod usa `python:3.12-s
 
 ## 🗂️ Struttura
 
-Vedi [`AGENTS.md`](AGENTS.md) (specifica tecnica, in inglese, letta dai tool AI) e [`docs/plans/IMPLEMENTATION_PLAN.md`](docs/plans/IMPLEMENTATION_PLAN.md).
+Vedi [`AGENTS.md`](AGENTS.md) (specifica tecnica, in inglese, letta dai tool AI).
 
 ## 🔗 Progetti collegati
 

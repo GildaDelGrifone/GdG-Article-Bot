@@ -125,7 +125,6 @@ GdG-Article-Bot/
 ├── scripts/             # create_article.py, create_card.py, publish_article.py
 ├── tests/               # mirrors the source tree; helpers in tests/support/
 ├── data/                # runtime: articles.db, briefs/, tmp/ (originals of the open drafts), logs/ (git-ignored)
-├── docs/plans/          # IMPLEMENTATION_PLAN.md (history and rationale of the build)
 ├── .claude/skills/      # write-article skill
 ├── .github/workflows/   # CI: pyflakes + pytest
 └── AGENTS.md  CLAUDE.md  README.md  .env.example  requirements*.txt  pytest.ini
